@@ -4,7 +4,7 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="description" content="Portfólio de Euler Nascimento — sistemas web, dashboards, automação e sites profissionais.">
 <title>Euler Nascimento | Portfólio</title>
-<link rel="icon" type="image/svg+xml" href="assets/favicon-final.png">
+<link rel="icon" type="image/png" href="assets/favicon-final.png">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -35,7 +35,7 @@
     <p class="lead">Dashboards, plataformas de gestão, automações e sites profissionais desenvolvidos para organizar processos, transformar dados em decisões e fortalecer negócios.</p>
     <div class="actions">
       <a class="button button-light" href="#projetos">Ver projetos ↓</a>
-      <a class="button button-dark" href="#contato">Solicitar orçamento</a>
+      <a class="button button-dark" href="#orcamento">Solicitar orçamento</a>
     </div>
     <div class="mini-tags"><span>Sistemas web</span><span>Dashboards</span><span>Firebase</span><span>Automação</span><span>Sites responsivos</span></div>
   </div>
@@ -114,6 +114,133 @@
         <div class="tags"><span>HTML & CSS</span><span>JavaScript</span><span>Firebase</span><span>Excel</span><span>Dashboards</span><span>UX/UI</span></div>
       </div>
     </div>
+  </div>
+</section>
+
+
+<section class="section container" id="orcamento">
+  <div class="section-head reveal">
+    <div>
+      <div class="kicker">Pré-orçamento inteligente</div>
+      <h2>Me conte sua necessidade e eu já recebo um briefing bem mais completo.</h2>
+    </div>
+    <p>Essa etapa ajuda a entender o tipo de projeto, a dor principal, o nível de urgência e a faixa de investimento. No final, você pode enviar tudo direto no WhatsApp.</p>
+  </div>
+
+  <div class="quote-box reveal">
+    <form class="quote-form" id="quoteForm">
+      <div class="field-grid two">
+        <label>
+          <span>Seu nome</span>
+          <input type="text" id="qNome" placeholder="Ex.: Euler Nascimento">
+        </label>
+        <label>
+          <span>Empresa ou negócio</span>
+          <input type="text" id="qEmpresa" placeholder="Ex.: Minha empresa / meu projeto">
+        </label>
+      </div>
+
+      <div class="field-grid two">
+        <label>
+          <span>Contato</span>
+          <input type="text" id="qContato" placeholder="WhatsApp ou e-mail">
+        </label>
+        <label>
+          <span>Tipo de projeto</span>
+          <select id="qTipo">
+            <option value="">Selecione</option>
+            <option value="site">Site institucional</option>
+            <option value="landing">Landing page</option>
+            <option value="loja">Loja online</option>
+            <option value="dashboard">Dashboard / painel</option>
+            <option value="sistema">Sistema web</option>
+            <option value="outro">Outro</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="field-grid three">
+        <label>
+          <span>Faixa de investimento</span>
+          <select id="qInvestimento">
+            <option value="">Selecione</option>
+            <option value="até R$ 1.000">Até R$ 1.000</option>
+            <option value="R$ 1.000 a R$ 2.500">R$ 1.000 a R$ 2.500</option>
+            <option value="R$ 2.500 a R$ 5.000">R$ 2.500 a R$ 5.000</option>
+            <option value="R$ 5.000+">Acima de R$ 5.000</option>
+            <option value="não definido">Ainda não definido</option>
+          </select>
+        </label>
+        <label>
+          <span>Prazo desejado</span>
+          <select id="qPrazo">
+            <option value="">Selecione</option>
+            <option value="urgente">Urgente</option>
+            <option value="até 15 dias">Até 15 dias</option>
+            <option value="até 30 dias">Até 30 dias</option>
+            <option value="sem pressa">Sem pressa</option>
+          </select>
+        </label>
+        <label>
+          <span>Objetivo principal</span>
+          <select id="qObjetivo">
+            <option value="">Selecione</option>
+            <option value="captar clientes">Captar clientes</option>
+            <option value="organizar processo">Organizar processo</option>
+            <option value="automatizar tarefas">Automatizar tarefas</option>
+            <option value="melhorar presença digital">Melhorar presença digital</option>
+            <option value="apresentar serviços/projetos">Apresentar serviços / projetos</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="field-block">
+        <span class="field-title">Qual é a sua principal dor hoje?</span>
+        <div class="check-grid">
+          <label><input type="checkbox" name="dor" value="Não tenho presença digital profissional"> <span>Não tenho presença digital profissional</span></label>
+          <label><input type="checkbox" name="dor" value="Perco tempo com processos manuais"> <span>Perco tempo com processos manuais</span></label>
+          <label><input type="checkbox" name="dor" value="Preciso captar mais clientes"> <span>Preciso captar mais clientes</span></label>
+          <label><input type="checkbox" name="dor" value="Meus dados estão desorganizados"> <span>Meus dados estão desorganizados</span></label>
+          <label><input type="checkbox" name="dor" value="Meu site atual está fraco ou desatualizado"> <span>Meu site atual está fraco ou desatualizado</span></label>
+          <label><input type="checkbox" name="dor" value="Preciso de relatórios ou dashboards"> <span>Preciso de relatórios ou dashboards</span></label>
+        </div>
+      </div>
+
+      <label class="field-block">
+        <span>Explique melhor o que você precisa</span>
+        <textarea id="qDescricao" rows="5" placeholder="Ex.: preciso de um site para mostrar meus serviços, receber contatos e transmitir mais profissionalismo..."></textarea>
+      </label>
+    </form>
+
+    <aside class="quote-side">
+      <div class="quote-summary">
+        <div class="summary-head">
+          <span class="summary-kicker">Leitura inicial</span>
+          <h3>Pré-avaliação do projeto</h3>
+        </div>
+        <div class="summary-cards">
+          <article>
+            <span>Complexidade</span>
+            <strong id="quoteNivel">Essencial</strong>
+          </article>
+          <article>
+            <span>Faixa sugerida</span>
+            <strong id="quoteFaixa">A definir</strong>
+          </article>
+          <article>
+            <span>Prazo estimado</span>
+            <strong id="quoteTempo">A definir</strong>
+          </article>
+        </div>
+        <p id="quoteTexto">Selecione o tipo de projeto para eu te dar uma leitura inicial e agilizar o orçamento.</p>
+      </div>
+
+      <div class="quote-actions">
+        <button type="button" class="button button-light" id="sendQuoteWhats">Enviar pré-orçamento no WhatsApp</button>
+        <button type="button" class="button button-dark" id="sendQuoteEmail">Enviar por e-mail</button>
+      </div>
+      <small class="quote-note">Preencha uma vez e envie o briefing completo pelo WhatsApp ou por e-mail.</small>
+    </aside>
   </div>
 </section>
 
