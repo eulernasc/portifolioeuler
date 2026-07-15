@@ -1,0 +1,29 @@
+<svg width="760" height="176" viewBox="0 0 760 176" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect x="0.5" y="0.5" width="759" height="175" rx="30" fill="#020713" stroke="rgba(83,130,255,0.18)"/>
+<rect x="0.5" y="0.5" width="759" height="175" rx="30" fill="url(#bgGlow)" fill-opacity="0.35"/>
+<g transform="translate(24,24)">
+<rect width="128" height="128" rx="30" fill="#030816"/>
+<rect x="7" y="7" width="114" height="114" rx="24" fill="url(#panel)" stroke="url(#stroke)" stroke-width="2"/>
+<path d="M31 34H77V44H43V57H71V67H43V84H77V94H31V34Z" fill="url(#neon)"/>
+<path d="M55 94V34H67L92 73V34H104V94H92L67 55V94H55Z" fill="url(#neon)"/>
+<path d="M20 86C25 74 35 65 49 59" stroke="#1FD0FF" stroke-width="3" stroke-linecap="round" opacity="0.85"/>
+<circle cx="100" cy="28" r="5" fill="#1FD0FF"/>
+</g>
+<text x="182" y="71" fill="#F5F9FF" font-size="40" font-family="Inter, Arial, sans-serif" font-weight="800" letter-spacing="-0.03em">Euler Nascimento</text>
+<text x="182" y="104" fill="#5CA8FF" font-size="16" font-family="Inter, Arial, sans-serif" font-weight="700" letter-spacing="0.20em">SISTEMAS WEB • AUTOMAÇÃO • DASHBOARDS</text>
+<text x="182" y="134" fill="#A6B5CC" font-size="15" font-family="Inter, Arial, sans-serif">Identidade tech moderna em azul vivo e preto</text>
+<defs>
+<linearGradient id="panel" x1="12" y1="8" x2="116" y2="118" gradientUnits="userSpaceOnUse">
+<stop stop-color="#081226"/><stop offset="1" stop-color="#04101E"/>
+</linearGradient>
+<linearGradient id="stroke" x1="17" y1="6" x2="111" y2="121" gradientUnits="userSpaceOnUse">
+<stop stop-color="#2251FF"/><stop offset="1" stop-color="#1FD0FF"/>
+</linearGradient>
+<linearGradient id="neon" x1="31" y1="34" x2="104" y2="94" gradientUnits="userSpaceOnUse">
+<stop stop-color="#FFFFFF"/><stop offset="0.55" stop-color="#8BC8FF"/><stop offset="1" stop-color="#2AD4FF"/>
+</linearGradient>
+<radialGradient id="bgGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(410 0) rotate(90) scale(190 420)">
+<stop stop-color="#154FFF" stop-opacity="0.42"/><stop offset="1" stop-color="#154FFF" stop-opacity="0"/>
+</radialGradient>
+</defs>
+</svg>

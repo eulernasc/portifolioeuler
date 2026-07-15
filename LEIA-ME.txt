@@ -1,0 +1,47 @@
+PORTFÓLIO PREMIUM — EULER NASCIMENTO
+
+ARQUIVOS PRINCIPAIS
+- index.html
+- projeto-ignis.html
+- projeto-pao-de-cleide.html
+- projeto-amanda.html
+
+COMO VISUALIZAR
+Abra o arquivo index.html no navegador.
+
+ANTES DE PUBLICAR
+1. E-mail configurado: eulernasc2015@gmail.com
+2. WhatsApp configurado: (35) 99749-0869
+3. As imagens do Ignis e do Pão de Cleide já foram tratadas para ocultar dados sensíveis.
+4. As imagens utilizadas no projeto Amanda Construction vieram do próprio site autorizado.
+5. Para publicar no GitHub Pages, envie todos os arquivos mantendo a pasta assets.
+
+OBSERVAÇÃO
+O portfólio foi criado para posicionar seu trabalho como desenvolvimento de sistemas web,
+dashboards, automação e sites profissionais — não apenas criação de páginas.
+
+
+ATUALIZAÇÃO
+- Loja do Pão de Cleide adicionada ao estudo de caso.
+- Amanda Construction ampliada com capturas reais da home, apresentação institucional e portfólio.
+- Links visíveis para o perfil do GitHub removidos.
+
+
+REBRAND VISUAL
+- Logo criada com base em Euler Nascimento.
+- Paleta alterada para azul e preto.
+- Favicon adicionado no navegador.
+- Botão "Voltar ao menu" adicionado nas páginas dos projetos.
+
+
+IDENTIDADE V4
+- Logo refeita com linguagem mais tech e moderna.
+- Azul mais vivo aplicado na marca e no portfólio.
+- Fundo com grid sutil e glow azul para reforçar o visual tecnológico.
+
+
+MOBILE FINAL
+- Menu hambúrguer funcional em celulares.
+- Botão Voltar ao menu acessível também no mobile.
+- Títulos, botões, imagens, cards e galerias ajustados para telas de 360 px ou maiores.
+- Elementos de toque com tamanho confortável e bloqueio de rolagem horizontal.
