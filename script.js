@@ -132,71 +132,91 @@ function buildWhatsAppMessage() {
     ? data.dores.map(item => `• ${item}`).join('\n')
     : '• Não informado';
 
+  // Emojis em escapes Unicode para evitar caracteres quebrados após o upload.
+  const iconDocument = '\u{1F4CB}';
+  const iconContact = '\u{1F464}';
+  const iconProject = '\u{1F680}';
+  const iconNeeds = '\u{1F9E9}';
+  const iconDescription = '\u{1F4DD}';
+  const iconAnalysis = '\u{1F50E}';
+  const divider = '\u2501'.repeat(22);
+
   return [
-    '💻 *SOLICITAÇÃO DE PRÉ-ORÇAMENTO*',
-    '_Enviado pelo portfólio de Euler Nascimento_',
+    `${iconDocument} *SOLICITAÇÃO DE PRÉ-ORÇAMENTO*`,
+    '_Portfólio Euler Nascimento | Sistemas Web_',
+    divider,
     '',
-    '👤 *CONTATO*',
+    `${iconContact} *DADOS DE CONTATO*`,
     `• *Nome:* ${data.nome}`,
     `• *Empresa/negócio:* ${data.empresa}`,
-    `• *Retorno:* ${data.contato}`,
+    `• *Contato para retorno:* ${data.contato}`,
     '',
-    '🚀 *PROJETO*',
+    `${iconProject} *INFORMAÇÕES DO PROJETO*`,
     `• *Tipo:* ${data.tipo}`,
-    `• *Objetivo:* ${data.objetivo}`,
-    `• *Investimento disponível:* ${data.investimento}`,
+    `• *Objetivo principal:* ${data.objetivo}`,
+    `• *Investimento previsto:* ${data.investimento}`,
     `• *Prazo desejado:* ${data.prazo}`,
     '',
-    '🧩 *PRINCIPAIS NECESSIDADES*',
+    `${iconNeeds} *PRINCIPAIS NECESSIDADES*`,
     dores,
     '',
-    '📝 *DESCRIÇÃO*',
+    `${iconDescription} *DESCRIÇÃO DO PROJETO*`,
     data.descricao,
     '',
-    '🔎 *LEITURA INICIAL*',
+    `${iconAnalysis} *PRÉ-AVALIAÇÃO*`,
     `• *Perfil do projeto:* ${data.complexidade}`,
     `• *Prazo de referência:* ${data.prazoReferencia}`,
-    '• *Orçamento:* definido após análise do escopo',
+    '• *Orçamento:* definido após análise completa do escopo',
     '',
-    'Podemos conversar sobre os próximos passos?'
+    divider,
+    'Gostaria de conversar sobre os próximos passos.'
   ].join('\n');
 }
 
 function buildEmailMessage() {
   const data = getQuoteData();
   const dores = data.dores.length
-    ? data.dores.map(item => `  • ${item}`).join('\n')
-    : '  • Não informado';
+    ? data.dores.map(item => `- ${item}`).join('\n')
+    : '- Não informado';
+
+  const divider = '-'.repeat(58);
 
   return [
-    'SOLICITAÇÃO DE PRÉ-ORÇAMENTO',
-    'Portfólio Euler Nascimento — Sistemas Web',
-    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    'NOVA SOLICITAÇÃO DE PRÉ-ORÇAMENTO',
+    'Portfólio Euler Nascimento | Sistemas Web',
+    divider,
     '',
-    'DADOS DE CONTATO',
-    `Nome                  ${data.nome}`,
-    `Empresa / negócio     ${data.empresa}`,
-    `Contato para retorno  ${data.contato}`,
+    'Olá, Euler,',
     '',
-    'DADOS DO PROJETO',
-    `Tipo                  ${data.tipo}`,
-    `Objetivo              ${data.objetivo}`,
-    `Investimento previsto ${data.investimento}`,
-    `Prazo desejado        ${data.prazo}`,
+    'Segue abaixo um novo briefing preenchido pelo seu portfólio.',
     '',
-    'PRINCIPAIS NECESSIDADES',
+    '01 | DADOS DE CONTATO',
+    `Nome: ${data.nome}`,
+    `Empresa ou negócio: ${data.empresa}`,
+    `Contato para retorno: ${data.contato}`,
+    '',
+    '02 | INFORMAÇÕES DO PROJETO',
+    `Tipo de projeto: ${data.tipo}`,
+    `Objetivo principal: ${data.objetivo}`,
+    `Investimento previsto: ${data.investimento}`,
+    `Prazo desejado: ${data.prazo}`,
+    '',
+    '03 | PRINCIPAIS NECESSIDADES',
     dores,
     '',
-    'DESCRIÇÃO DO PROJETO',
+    '04 | DESCRIÇÃO DO PROJETO',
     data.descricao,
     '',
-    'LEITURA INICIAL',
-    `Perfil do projeto     ${data.complexidade}`,
-    `Prazo de referência   ${data.prazoReferencia}`,
-    'Orçamento             Definido após análise do escopo',
+    '05 | PRÉ-AVALIAÇÃO AUTOMÁTICA',
+    `Perfil do projeto: ${data.complexidade}`,
+    `Prazo de referência: ${data.prazoReferencia}`,
+    'Orçamento: definido após análise completa do escopo',
     '',
-    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
-    'Esta solicitação é uma primeira etapa. Valores e prazos finais serão confirmados após o alinhamento completo do escopo.'
+    divider,
+    'PRÓXIMO PASSO',
+    'Analisar a necessidade, alinhar o escopo e preparar uma proposta personalizada.',
+    '',
+    'Esta mensagem foi gerada automaticamente pelo formulário de pré-orçamento do portfólio.'
   ].join('\n');
 }
 
