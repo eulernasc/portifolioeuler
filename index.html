@@ -98,6 +98,230 @@
     ]
   }
   </script>
+
+  <style id="responsive-hotfix">
+    /* Impede qualquer elemento de aumentar a largura da página */
+    html,
+    body {
+      width: 100%;
+      max-width: 100%;
+      overflow-x: hidden;
+    }
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+    }
+
+    img,
+    video,
+    iframe,
+    canvas,
+    svg {
+      max-width: 100%;
+    }
+
+    main,
+    section,
+    .container,
+    .hero,
+    .hero-copy,
+    .hero-stage,
+    .browser,
+    .quote-box,
+    .quote-form,
+    .quote-side,
+    .quote-summary,
+    .contact-box {
+      min-width: 0;
+      max-width: 100%;
+    }
+
+    /* Mantém o painel inicial na proporção correta */
+    .hero-stage {
+      overflow: hidden;
+    }
+
+    .hero-stage .browser {
+      width: 100%;
+      max-width: 100%;
+      overflow: hidden;
+    }
+
+    .hero-stage .browser img {
+      display: block;
+      width: 100%;
+      height: auto !important;
+      max-height: none !important;
+      object-fit: contain !important;
+      object-position: center top;
+      aspect-ratio: auto !important;
+    }
+
+    .hero-logo {
+      width: min(100%, 520px);
+      height: auto;
+    }
+
+    /* Checkbox mais leve e proporcional */
+    .check-grid label {
+      min-width: 0;
+    }
+
+    .check-grid input[type="checkbox"] {
+      appearance: none;
+      -webkit-appearance: none;
+      flex: 0 0 22px;
+      width: 22px;
+      height: 22px;
+      margin: 0;
+      border: 2px solid rgba(72, 146, 255, .65);
+      border-radius: 6px;
+      background: rgba(3, 12, 30, .9);
+      display: grid;
+      place-content: center;
+      cursor: pointer;
+      transition: border-color .2s ease, background .2s ease, box-shadow .2s ease;
+    }
+
+    .check-grid input[type="checkbox"]::before {
+      content: "";
+      width: 10px;
+      height: 6px;
+      border-left: 2px solid #fff;
+      border-bottom: 2px solid #fff;
+      transform: rotate(-45deg) scale(0);
+      transition: transform .15s ease;
+      margin-top: -2px;
+    }
+
+    .check-grid input[type="checkbox"]:checked {
+      border-color: #00b7ff;
+      background: linear-gradient(135deg, #087cff, #004bd7);
+      box-shadow: 0 0 16px rgba(0, 153, 255, .45);
+    }
+
+    .check-grid input[type="checkbox"]:checked::before {
+      transform: rotate(-45deg) scale(1);
+    }
+
+    .check-grid input[type="checkbox"]:focus-visible {
+      outline: 3px solid rgba(0, 183, 255, .3);
+      outline-offset: 3px;
+    }
+
+    @media (max-width: 820px) {
+      .container {
+        width: 100%;
+        padding-left: 20px;
+        padding-right: 20px;
+      }
+
+      .hero {
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) !important;
+        gap: 32px;
+      }
+
+      .hero-copy,
+      .hero-stage {
+        width: 100%;
+      }
+
+      .hero-stage .browser {
+        margin-inline: auto;
+      }
+
+      .float-note {
+        max-width: min(190px, 46vw);
+      }
+
+      .quote-box {
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) !important;
+        width: 100%;
+      }
+
+      .quote-form,
+      .quote-side {
+        width: 100%;
+      }
+
+      .field-grid.two,
+      .field-grid.three {
+        grid-template-columns: minmax(0, 1fr) !important;
+      }
+
+      .check-grid {
+        grid-template-columns: minmax(0, 1fr) !important;
+        gap: 12px;
+      }
+
+      .check-grid label {
+        display: flex;
+        align-items: flex-start;
+        gap: 14px;
+        width: 100%;
+        min-height: 64px;
+        padding: 16px;
+      }
+
+      .check-grid label span {
+        min-width: 0;
+        overflow-wrap: anywhere;
+        line-height: 1.35;
+      }
+
+      .check-grid input[type="checkbox"] {
+        flex-basis: 22px;
+        width: 22px;
+        height: 22px;
+        margin-top: 2px;
+      }
+
+      input,
+      select,
+      textarea,
+      button {
+        max-width: 100%;
+      }
+
+      textarea {
+        resize: vertical;
+      }
+
+      .summary-head h3,
+      .quote-summary p {
+        overflow-wrap: anywhere;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .container {
+        padding-left: 16px;
+        padding-right: 16px;
+      }
+
+      .hero-stage .browser {
+        border-radius: 18px;
+      }
+
+      .browser-bar {
+        min-height: 32px;
+      }
+
+      .float-note {
+        font-size: 11px;
+      }
+
+      .check-grid label {
+        padding: 14px;
+        min-height: 58px;
+      }
+    }
+  </style>
+
 </head>
 <body>
 
@@ -119,7 +343,7 @@
 <main>
 <section class="hero container">
   <div class="hero-copy reveal">
-    <img class="hero-logo" src="assets/logo-full-final.png" alt="Euler Nascimento — Sistemas Web, Automação e Dashboards" width="1320" height="380" fetchpriority="high">
+    <img class="hero-logo" src="assets/logo-full-final.png" alt="Euler Nascimento — Sistemas Web, Automação e Dashboards" fetchpriority="high">
     <div class="kicker">Desenvolvimento web com visão de negócio</div>
     <h1>Eu crio sistemas que resolvem <em>problemas reais.</em></h1>
     <p class="lead">Dashboards, plataformas de gestão, automações e sites profissionais desenvolvidos para organizar processos, transformar dados em decisões e fortalecer negócios.</p>
@@ -132,7 +356,7 @@
   <div class="hero-stage reveal">
     <div class="browser">
       <div class="browser-bar"><i></i><i></i><i></i><span></span></div>
-      <img src="assets/ignis-dashboard.webp" alt="Dashboard real do sistema Ignis com dados protegidos" width="1840" height="937" fetchpriority="high">
+      <img src="assets/ignis-dashboard.webp" alt="Dashboard real do sistema Ignis com dados protegidos" fetchpriority="high">
     </div>
     <div class="float-note float-a"><b>Projeto em funcionamento</b><small>Interface real, dados protegidos</small></div>
     <div class="float-note float-b"><b>Sistema completo</b><small>Gestão, análise e automação</small></div>
