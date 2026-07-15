@@ -129,44 +129,37 @@ function getQuoteData() {
 function buildWhatsAppMessage() {
   const data = getQuoteData();
   const dores = data.dores.length
-    ? data.dores.map(item => `• ${item}`).join('\n')
-    : '• Não informado';
+    ? data.dores.map(item => `- ${item}`).join('\n')
+    : '- Não informado';
 
-  // Emojis em escapes Unicode para evitar caracteres quebrados após o upload.
-  const iconDocument = '\u{1F4CB}';
-  const iconContact = '\u{1F464}';
-  const iconProject = '\u{1F680}';
-  const iconNeeds = '\u{1F9E9}';
-  const iconDescription = '\u{1F4DD}';
-  const iconAnalysis = '\u{1F50E}';
-  const divider = '\u2501'.repeat(22);
+  const divider = '-'.repeat(34);
 
   return [
-    `${iconDocument} *SOLICITAÇÃO DE PRÉ-ORÇAMENTO*`,
-    '_Portfólio Euler Nascimento | Sistemas Web_',
+    '*SOLICITAÇÃO DE PRÉ-ORÇAMENTO*',
+    '_Enviado pelo portfólio de Euler Nascimento_',
     divider,
     '',
-    `${iconContact} *DADOS DE CONTATO*`,
-    `• *Nome:* ${data.nome}`,
-    `• *Empresa/negócio:* ${data.empresa}`,
-    `• *Contato para retorno:* ${data.contato}`,
+    '*DADOS DE CONTATO*',
+    `- *Nome:* ${data.nome}`,
+    `- *Empresa/negócio:* ${data.empresa}`,
+    `- *Contato para retorno:* ${data.contato}`,
     '',
-    `${iconProject} *INFORMAÇÕES DO PROJETO*`,
-    `• *Tipo:* ${data.tipo}`,
-    `• *Objetivo principal:* ${data.objetivo}`,
-    `• *Investimento previsto:* ${data.investimento}`,
-    `• *Prazo desejado:* ${data.prazo}`,
+    '*INFORMAÇÕES DO PROJETO*',
+    `- *Tipo:* ${data.tipo}`,
+    `- *Objetivo principal:* ${data.objetivo}`,
+    `- *Investimento previsto:* ${data.investimento}`,
+    `- *Prazo desejado:* ${data.prazo}`,
     '',
-    `${iconNeeds} *PRINCIPAIS NECESSIDADES*`,
+    '*PRINCIPAIS NECESSIDADES*',
     dores,
     '',
-    `${iconDescription} *DESCRIÇÃO DO PROJETO*`,
+    '*DESCRIÇÃO DO PROJETO*',
     data.descricao,
     '',
-    `${iconAnalysis} *PRÉ-AVALIAÇÃO*`,
-    `• *Perfil do projeto:* ${data.complexidade}`,
-    `• *Prazo de referência:* ${data.prazoReferencia}`,
-    '• *Orçamento:* definido após análise completa do escopo',
+    '*PRÉ-AVALIAÇÃO*',
+    `- *Perfil do projeto:* ${data.complexidade}`,
+    `- *Prazo de referência:* ${data.prazoReferencia}`,
+    '- *Orçamento:* definido após análise completa do escopo',
     '',
     divider,
     'Gostaria de conversar sobre os próximos passos.'
