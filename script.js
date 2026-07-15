@@ -33,7 +33,6 @@ if (menuToggle && mobileNav) {
   });
 }
 
-
 // Quote section
 const quoteForm = document.getElementById('quoteForm');
 const qTipo = document.getElementById('qTipo');
@@ -48,13 +47,42 @@ const sendQuoteWhats = document.getElementById('sendQuoteWhats');
 const sendQuoteEmail = document.getElementById('sendQuoteEmail');
 
 const quoteConfigs = {
-  site: { nivel: 'Essencial', faixa: 'R$ 900 a R$ 1.800', tempo: '7 a 15 dias', texto: 'Indicado para apresentar serviços, transmitir profissionalismo e captar contatos com mais credibilidade.' },
-  landing: { nivel: 'Essencial', faixa: 'R$ 700 a R$ 1.400', tempo: '5 a 10 dias', texto: 'Boa opção para campanhas, páginas de venda, lançamentos ou captação rápida de leads.' },
-  loja: { nivel: 'Intermediário', faixa: 'R$ 1.500 a R$ 3.000', tempo: '12 a 25 dias', texto: 'Ideal para vender online com catálogo, pedidos, produtos e uma experiência mais completa.' },
-  dashboard: { nivel: 'Intermediário', faixa: 'R$ 1.200 a R$ 3.500', tempo: '10 a 20 dias', texto: 'Excelente para acompanhar indicadores, relatórios e transformar dados em decisões.' },
-  sistema: { nivel: 'Avançado', faixa: 'R$ 2.500 a R$ 8.000+', tempo: '20 a 45 dias', texto: 'Indicado para processos internos, automação, controle operacional e regras de negócio específicas.' },
-  outro: { nivel: 'Personalizado', faixa: 'Sob análise', tempo: 'A combinar', texto: 'Projeto fora do padrão inicial. Vou analisar a necessidade para montar uma solução sob medida.' }
+  site: {
+    nivel: 'Essencial',
+    tempo: '7 a 15 dias',
+    texto: 'Indicado para apresentar serviços, transmitir profissionalismo e captar contatos com mais credibilidade.'
+  },
+  landing: {
+    nivel: 'Essencial',
+    tempo: '5 a 10 dias',
+    texto: 'Boa opção para campanhas, páginas de venda, lançamentos ou captação rápida de contatos.'
+  },
+  loja: {
+    nivel: 'Intermediário',
+    tempo: '12 a 25 dias',
+    texto: 'Ideal para vender online com catálogo, pedidos, produtos e uma experiência mais completa.'
+  },
+  dashboard: {
+    nivel: 'Intermediário',
+    tempo: '10 a 20 dias',
+    texto: 'Excelente para acompanhar indicadores, relatórios e transformar dados em decisões.'
+  },
+  sistema: {
+    nivel: 'Avançado',
+    tempo: '20 a 45 dias',
+    texto: 'Indicado para processos internos, automação, controle operacional e regras de negócio específicas.'
+  },
+  outro: {
+    nivel: 'Personalizado',
+    tempo: 'A combinar',
+    texto: 'Projeto fora do padrão inicial. A necessidade será analisada para definir uma solução sob medida.'
+  }
 };
+
+function selectedText(select, fallback = 'Não informado') {
+  if (!select || !select.value) return fallback;
+  return select.options[select.selectedIndex]?.text || fallback;
+}
 
 function getSelectedDores() {
   return [...document.querySelectorAll('input[name="dor"]:checked')].map(item => item.value);
@@ -62,48 +90,113 @@ function getSelectedDores() {
 
 function updateQuoteEstimate() {
   if (!qTipo || !quoteNivel || !quoteFaixa || !quoteTempo || !quoteTexto) return;
-  const config = quoteConfigs[qTipo.value] || { nivel: 'Essencial', faixa: 'A definir', tempo: 'A definir', texto: 'Selecione o tipo de projeto para eu te dar uma leitura inicial e agilizar o orçamento.' };
+
+  const config = quoteConfigs[qTipo.value] || {
+    nivel: 'A definir',
+    tempo: 'A definir',
+    texto: 'Selecione o tipo de projeto para receber uma leitura inicial. O valor final será definido somente após a análise do escopo.'
+  };
+
   let nivel = config.nivel;
   const dores = getSelectedDores().length;
-  const urgente = qPrazo && qPrazo.value === 'urgente';
+  const urgente = qPrazo?.value === 'urgente';
 
   if (dores >= 4 && nivel === 'Essencial') nivel = 'Intermediário';
-  if ((dores >= 4 || urgente) && (nivel === 'Intermediário')) nivel = 'Avançado';
+  if ((dores >= 4 || urgente) && nivel === 'Intermediário') nivel = 'Avançado';
 
   quoteNivel.textContent = nivel;
-  quoteFaixa.textContent = config.faixa;
+  quoteFaixa.textContent = 'Após análise';
   quoteTempo.textContent = config.tempo;
   quoteTexto.textContent = config.texto;
 }
 
-function buildQuoteMessage() {
-  const nome = document.getElementById('qNome')?.value.trim() || '-';
-  const empresa = document.getElementById('qEmpresa')?.value.trim() || '-';
-  const contato = document.getElementById('qContato')?.value.trim() || '-';
-  const tipo = qTipo?.options[qTipo.selectedIndex]?.text || '-';
-  const objetivo = qObjetivo?.options[qObjetivo.selectedIndex]?.text || '-';
-  const investimento = qInvestimento?.options[qInvestimento.selectedIndex]?.text || '-';
-  const prazo = qPrazo?.options[qPrazo.selectedIndex]?.text || '-';
-  const dores = getSelectedDores();
-  const descricao = document.getElementById('qDescricao')?.value.trim() || '-';
+function getQuoteData() {
+  return {
+    nome: document.getElementById('qNome')?.value.trim() || 'Não informado',
+    empresa: document.getElementById('qEmpresa')?.value.trim() || 'Não informado',
+    contato: document.getElementById('qContato')?.value.trim() || 'Não informado',
+    tipo: selectedText(qTipo),
+    objetivo: selectedText(qObjetivo),
+    investimento: selectedText(qInvestimento),
+    prazo: selectedText(qPrazo),
+    dores: getSelectedDores(),
+    descricao: document.getElementById('qDescricao')?.value.trim() || 'Não informado',
+    complexidade: quoteNivel?.textContent || 'A definir',
+    prazoReferencia: quoteTempo?.textContent || 'A definir'
+  };
+}
+
+function buildWhatsAppMessage() {
+  const data = getQuoteData();
+  const dores = data.dores.length
+    ? data.dores.map(item => `• ${item}`).join('\n')
+    : '• Não informado';
 
   return [
-    'Olá, Euler! Preenchi o pré-orçamento do seu portfólio:',
+    '💻 *SOLICITAÇÃO DE PRÉ-ORÇAMENTO*',
+    '_Enviado pelo portfólio de Euler Nascimento_',
     '',
-    `Nome: ${nome}`,
-    `Empresa/negócio: ${empresa}`,
-    `Contato: ${contato}`,
-    `Tipo de projeto: ${tipo}`,
-    `Objetivo principal: ${objetivo}`,
-    `Faixa de investimento: ${investimento}`,
-    `Prazo desejado: ${prazo}`,
-    `Dor principal: ${dores.length ? dores.join('; ') : '-'}`,
-    `Descrição: ${descricao}`,
+    '👤 *CONTATO*',
+    `• *Nome:* ${data.nome}`,
+    `• *Empresa/negócio:* ${data.empresa}`,
+    `• *Retorno:* ${data.contato}`,
     '',
-    'Leitura inicial:',
-    `• Complexidade: ${quoteNivel?.textContent || '-'}`,
-    `• Faixa sugerida: ${quoteFaixa?.textContent || '-'}`,
-    `• Prazo estimado: ${quoteTempo?.textContent || '-'}`,
+    '🚀 *PROJETO*',
+    `• *Tipo:* ${data.tipo}`,
+    `• *Objetivo:* ${data.objetivo}`,
+    `• *Investimento disponível:* ${data.investimento}`,
+    `• *Prazo desejado:* ${data.prazo}`,
+    '',
+    '🧩 *PRINCIPAIS NECESSIDADES*',
+    dores,
+    '',
+    '📝 *DESCRIÇÃO*',
+    data.descricao,
+    '',
+    '🔎 *LEITURA INICIAL*',
+    `• *Perfil do projeto:* ${data.complexidade}`,
+    `• *Prazo de referência:* ${data.prazoReferencia}`,
+    '• *Orçamento:* definido após análise do escopo',
+    '',
+    'Podemos conversar sobre os próximos passos?'
+  ].join('\n');
+}
+
+function buildEmailMessage() {
+  const data = getQuoteData();
+  const dores = data.dores.length
+    ? data.dores.map(item => `  • ${item}`).join('\n')
+    : '  • Não informado';
+
+  return [
+    'SOLICITAÇÃO DE PRÉ-ORÇAMENTO',
+    'Portfólio Euler Nascimento — Sistemas Web',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '',
+    'DADOS DE CONTATO',
+    `Nome                  ${data.nome}`,
+    `Empresa / negócio     ${data.empresa}`,
+    `Contato para retorno  ${data.contato}`,
+    '',
+    'DADOS DO PROJETO',
+    `Tipo                  ${data.tipo}`,
+    `Objetivo              ${data.objetivo}`,
+    `Investimento previsto ${data.investimento}`,
+    `Prazo desejado        ${data.prazo}`,
+    '',
+    'PRINCIPAIS NECESSIDADES',
+    dores,
+    '',
+    'DESCRIÇÃO DO PROJETO',
+    data.descricao,
+    '',
+    'LEITURA INICIAL',
+    `Perfil do projeto     ${data.complexidade}`,
+    `Prazo de referência   ${data.prazoReferencia}`,
+    'Orçamento             Definido após análise do escopo',
+    '',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    'Esta solicitação é uma primeira etapa. Valores e prazos finais serão confirmados após o alinhamento completo do escopo.'
   ].join('\n');
 }
 
@@ -115,21 +208,16 @@ if (quoteForm) {
 
 if (sendQuoteWhats) {
   sendQuoteWhats.addEventListener('click', () => {
-    const message = encodeURIComponent(buildQuoteMessage());
+    const message = encodeURIComponent(buildWhatsAppMessage());
     window.open(`https://wa.me/5535997490869?text=${message}`, '_blank', 'noopener');
   });
 }
 
 if (sendQuoteEmail) {
   sendQuoteEmail.addEventListener('click', () => {
-    const nome = document.getElementById('qNome')?.value.trim();
-    const empresa = document.getElementById('qEmpresa')?.value.trim();
-    const subjectParts = ['Solicitação de orçamento'];
-    if (nome) subjectParts.push(nome);
-    if (empresa) subjectParts.push(empresa);
-
-    const subject = encodeURIComponent(subjectParts.join(' - '));
-    const body = encodeURIComponent(buildQuoteMessage());
+    const data = getQuoteData();
+    const subject = encodeURIComponent(`Pré-orçamento: ${data.tipo} — ${data.nome}`);
+    const body = encodeURIComponent(buildEmailMessage());
     window.location.href = `mailto:eulernasc2015@gmail.com?subject=${subject}&body=${body}`;
   });
 }
