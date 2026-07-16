@@ -322,6 +322,39 @@
     }
   </style>
 
+
+  <style id="float-notes-fix">
+    .hero-stage { position: relative; overflow: visible !important; }
+    .hero-stage .browser { position: relative; z-index: 1; overflow: hidden; }
+    .hero-stage .float-note {
+      position: absolute; z-index: 3; width: max-content;
+      max-width: min(260px, 42%); min-width: 180px;
+      padding: 16px 18px; border: 1px solid rgba(45,126,255,.45);
+      border-radius: 18px; background: rgba(3,12,31,.93);
+      backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      box-shadow: 0 16px 38px rgba(0,0,0,.32);
+      overflow: visible; white-space: normal;
+    }
+    .hero-stage .float-note b,
+    .hero-stage .float-note small { display:block; max-width:100%; white-space:normal; overflow-wrap:anywhere; }
+    .hero-stage .float-note b { margin-bottom:4px; line-height:1.2; }
+    .hero-stage .float-note small { line-height:1.35; }
+    .hero-stage .float-a { left:18px !important; bottom:34px !important; transform:none !important; }
+    .hero-stage .float-b { right:18px !important; top:70px !important; transform:none !important; }
+    @media (max-width:820px) {
+      .hero-stage { overflow:hidden !important; }
+      .hero-stage .float-note { max-width:calc(100% - 28px); min-width:0; width:auto; padding:12px 14px; border-radius:14px; font-size:12px; }
+      .hero-stage .float-a { left:14px !important; bottom:14px !important; right:auto !important; }
+      .hero-stage .float-b { top:48px !important; right:14px !important; left:auto !important; }
+    }
+    @media (max-width:480px) {
+      .hero-stage .float-note { max-width:46%; padding:10px 12px; font-size:11px; }
+      .hero-stage .float-note small { font-size:10px; }
+      .hero-stage .float-a { left:10px !important; bottom:10px !important; }
+      .hero-stage .float-b { top:40px !important; right:10px !important; }
+    }
+  </style>
+
 </head>
 <body>
 
