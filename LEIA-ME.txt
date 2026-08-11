@@ -3,6 +3,7 @@ PORTFÓLIO PREMIUM — EULER NASCIMENTO
 ARQUIVOS PRINCIPAIS
 - index.html
 - projeto-ignis.html
+- projeto-mc-bem-estar.html
 - projeto-pao-de-cleide.html
 - projeto-amanda.html
 
@@ -14,7 +15,8 @@ ANTES DE PUBLICAR
 2. WhatsApp configurado: (35) 99749-0869
 3. As imagens do Ignis e do Pão de Cleide já foram tratadas para ocultar dados sensíveis.
 4. As imagens utilizadas no projeto Amanda Construction vieram do próprio site autorizado.
-5. Para publicar no GitHub Pages, envie todos os arquivos mantendo a pasta assets.
+5. As capturas do MC Bem Estar foram autorizadas, e os nomes dos clientes foram substituídos por dados fictícios.
+6. Para publicar no GitHub Pages, envie todos os arquivos mantendo a pasta assets.
 
 OBSERVAÇÃO
 O portfólio foi criado para posicionar seu trabalho como desenvolvimento de sistemas web,
@@ -25,6 +27,7 @@ ATUALIZAÇÃO
 - Loja do Pão de Cleide adicionada ao estudo de caso.
 - Amanda Construction ampliada com capturas reais da home, apresentação institucional e portfólio.
 - Links visíveis para o perfil do GitHub removidos.
+- MC Bem Estar adicionado com site público, agenda, WhatsApp, gestão financeira e relatório em PDF.
 
 
 REBRAND VISUAL

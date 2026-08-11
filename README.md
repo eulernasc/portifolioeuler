@@ -5,6 +5,7 @@ Portfólio profissional de **Euler Nascimento**, voltado a sistemas web, dashboa
 ## Projetos apresentados
 
 - Ignis — plataforma de inteligência operacional
+- MC Bem Estar — sistema de agendamento, gestão, WhatsApp e relatórios
 - Pão de Cleide — loja digital e sistema de gestão
 - Amanda Construction — site institucional internacional
 
@@ -12,6 +13,7 @@ Portfólio profissional de **Euler Nascimento**, voltado a sistemas web, dashboa
 
 - Layout responsivo para computador, tablet e celular
 - Estudos de caso com telas reais e dados protegidos
+- Dados de clientes do MC Bem Estar anonimizados nas capturas
 - Formulário de pré-orçamento
 - Envio do briefing por WhatsApp ou e-mail
 - Navegação mobile
