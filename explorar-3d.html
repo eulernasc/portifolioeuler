@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#030712">
+  <title>Portfólio 3D | Euler Nascimento</title>
+  <meta name="description" content="Explore os projetos de Euler Nascimento em uma experiência 3D interativa.">
+  <link rel="icon" type="image/png" href="assets/favicon-final.png">
+  <link rel="stylesheet" href="portfolio3d.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body class="experience-page">
+  <main id="experience3d" aria-label="Experiência 3D do portfólio">
+    <canvas id="scene3d" aria-label="Cena 3D interativa"></canvas>
+
+    <div class="experience-topbar">
+      <a class="experience-brand" href="index.html" aria-label="Voltar para o portfólio">
+        <img src="assets/logo-mark-final.png" alt="">
+        <span><strong>Euler Nascimento</strong><small>Portfólio 3D</small></span>
+      </a>
+      <a class="experience-exit" href="index.html">Sair do modo 3D</a>
+    </div>
+
+    <section class="experience-loading" id="experienceLoading" aria-live="polite">
+      <div class="loading-card">
+        <img src="assets/logo-mark-final.png" alt="" class="loading-logo">
+        <p class="loading-kicker">Preparando experiência</p>
+        <h1>Carregando Euler 3D</h1>
+        <div class="loading-track"><span id="loadingBar"></span></div>
+        <p id="loadingStatus">Inicializando ambiente...</p>
+        <small>O personagem é carregado apenas ao entrar nesta experiência para não pesar o portfólio principal.</small>
+      </div>
+    </section>
+
+    <section class="experience-error" id="experienceError" hidden>
+      <div class="loading-card">
+        <p class="loading-kicker">Não foi possível carregar</p>
+        <h1>O modo 3D encontrou um problema.</h1>
+        <p id="experienceErrorText">Verifique os arquivos do personagem e tente novamente.</p>
+        <div class="error-actions">
+          <button type="button" id="retry3d">Tentar novamente</button>
+          <a href="index.html">Voltar ao portfólio</a>
+        </div>
+      </div>
+    </section>
+
+    <div class="experience-hud" id="experienceHud" hidden>
+      <div class="hud-help">
+        <strong>Explore meus projetos</strong>
+        <span><kbd>W A S D</kbd> ou setas para caminhar</span>
+        <span><kbd>E</kbd> para entrar em um projeto</span>
+      </div>
+      <div class="hud-project" id="hudProject" aria-live="polite">
+        <small>Projeto próximo</small>
+        <strong id="hudProjectName">Ignis</strong>
+        <span id="hudProjectHint">Pressione E para entrar</span>
+      </div>
+    </div>
+
+    <div class="mobile-controls" id="mobileControls" hidden aria-label="Controles de movimento">
+      <div class="mobile-dpad">
+        <button type="button" data-key="ArrowUp" aria-label="Andar para frente">▲</button>
+        <button type="button" data-key="ArrowLeft" aria-label="Andar para esquerda">◀</button>
+        <button type="button" data-key="ArrowDown" aria-label="Andar para trás">▼</button>
+        <button type="button" data-key="ArrowRight" aria-label="Andar para direita">▶</button>
+      </div>
+      <button type="button" class="mobile-enter" id="mobileEnter" disabled>Entrar</button>
+    </div>
+
+    <div class="portal-transition" id="portalTransition" aria-hidden="true">
+      <div class="portal-transition-ring"></div>
+    </div>
+  </main>
+
+  <noscript>Ative o JavaScript para acessar a experiência 3D.</noscript>
+  <script type="module" src="portfolio3d.js"></script>
+</body>
+</html>
