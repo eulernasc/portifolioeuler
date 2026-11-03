@@ -1,0 +1,9 @@
+{
+  "modelParts": [
+    "euler-character.fbx.part01",
+    "euler-character.fbx.part02",
+    "euler-character.fbx.part03"
+  ],
+  "walking": "Walking.fbx",
+  "textureBase": "./"
+}
