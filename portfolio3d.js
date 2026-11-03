@@ -283,6 +283,30 @@ function clipByName(clips, terms) {
   return clips.find(clip => normalizedTerms.some(term => clip.name.toLowerCase().includes(term))) || null;
 }
 
+function alignWalkingClip(sourceClip, target, source) {
+  const clip = sourceClip.clone();
+  const targetHips = target.getObjectByName('mixamorigHips');
+  const sourceHips = source.getObjectByName('mixamorigHips');
+  if (!targetHips || !sourceHips) return clip;
+  // Convert the Mixamo Y-up root into the Tripo Z-up rest frame.
+  // Do this on the clip so idle/walk crossfades share the same coordinates.
+  const correction = targetHips.quaternion.clone().multiply(sourceHips.quaternion.clone().invert());
+  const rotation = new THREE.Quaternion();
+  const position = new THREE.Vector3();
+  for (const track of clip.tracks) {
+    if (track.name === 'mixamorigHips.quaternion') {
+      for (let i = 0; i < track.values.length; i += 4) {
+        rotation.fromArray(track.values, i).premultiply(correction).normalize().toArray(track.values, i);
+      }
+    } else if (track.name === 'mixamorigHips.position') {
+      for (let i = 0; i < track.values.length; i += 3) {
+        position.fromArray(track.values, i).sub(sourceHips.position).applyQuaternion(correction).add(targetHips.position).toArray(track.values, i);
+      }
+    }
+  }
+  return clip;
+}
+
 function setupAnimations(mainObject, walkingObject) {
   mixer = new THREE.AnimationMixer(mainObject);
   const mainClips = mainObject.animations || [];
@@ -290,7 +314,7 @@ function setupAnimations(mainObject, walkingObject) {
 
   const idleClip = clipByName(mainClips, ['idle', 'ocioso']) || mainClips[0] || null;
   const diveClip = clipByName(mainClips, ['dive', 'mergul']) || mainClips.find(clip => clip !== idleClip) || null;
-  const walkClip = walkingClips[0] || null;
+  const walkClip = walkingClips[0] ? alignWalkingClip(walkingClips[0], mainObject, walkingObject) : null;
 
   if (idleClip) idleAction = mixer.clipAction(idleClip, mainObject);
   if (diveClip) {
@@ -514,3 +538,4 @@ async function init() {
 
 retryButton.addEventListener('click', () => window.location.reload());
 init();
+
