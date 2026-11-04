@@ -26,7 +26,10 @@
         <img src="assets/logo-mark-final.png" alt="">
         <span><strong>Euler Nascimento</strong><small>Portfólio 3D</small></span>
       </a>
-      <a class="experience-exit" href="index.html">Sair do modo 3D</a>
+      <div class="topbar-actions">
+        <button class="experience-reset" type="button" id="resetCamera" aria-label="Restaurar câmera">Restaurar câmera</button>
+        <a class="experience-exit" href="index.html">Sair do modo 3D</a>
+      </div>
     </div>
 
     <section class="experience-loading" id="experienceLoading" aria-live="polite">
@@ -53,10 +56,17 @@
     </section>
 
     <div class="experience-hud" id="experienceHud" hidden>
+      <div class="room-heading" aria-live="polite">
+        <small>EXPERIÊNCIA CONTÍNUA</small>
+        <strong id="currentRoom">HALL PRINCIPAL</strong>
+        <span id="roomDescription">Explore os portais da galeria</span>
+      </div>
       <div class="hud-help">
-        <strong>Explore meus projetos</strong>
-        <span><kbd>W A S D</kbd> ou setas para caminhar</span>
-        <span><kbd>E</kbd> para entrar em um projeto</span>
+        <strong>Explore a galeria</strong>
+        <span><kbd>W A S D</kbd> ou setas: caminhar</span>
+        <span><kbd>E</kbd>: atravessar o portal</span>
+        <span>Arraste: girar · Roda/pinça: zoom · <kbd>C</kbd>: câmera</span>
+        <span>Toque nas telas do Ignis para ampliar</span>
       </div>
       <div class="hud-project" id="hudProject" aria-live="polite">
         <small>Projeto próximo</small>
@@ -75,12 +85,30 @@
       <button type="button" class="mobile-enter" id="mobileEnter" disabled>Entrar</button>
     </div>
 
+    <div class="room-status" id="roomStatus" role="status" aria-live="polite" hidden></div>
+    <aside class="image-hint" id="imageHint" hidden>
+      <small>PAINEL IGNIS</small>
+      <strong id="imageHintTitle"></strong>
+      <p id="imageHintDescription"></p>
+      <button type="button" id="imageHintButton">Ampliar imagem</button>
+    </aside>
     <div class="portal-transition" id="portalTransition" aria-hidden="true">
       <div class="portal-transition-ring"></div>
     </div>
+    <section class="image-lightbox" id="imageLightbox" role="dialog" aria-modal="true" aria-labelledby="lightboxTitle" hidden>
+      <div class="lightbox-card">
+        <div class="lightbox-head">
+          <div><small>IGNIS / CAPTURA REAL COM DADOS PROTEGIDOS</small><h2 id="lightboxTitle"></h2></div>
+          <button type="button" id="lightboxClose" aria-label="Fechar imagem">Fechar ✕</button>
+        </div>
+        <img id="lightboxImage" alt="">
+        <p id="lightboxDescription"></p>
+      </div>
+    </section>
   </main>
 
   <noscript>Ative o JavaScript para acessar a experiência 3D.</noscript>
   <script type="module" src="portfolio3d.js"></script>
 </body>
 </html>
+

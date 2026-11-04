@@ -1,251 +1,292 @@
 import * as THREE from 'three';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 
-const ASSET_ROOT = 'assets/3d/character/';
-const MANIFEST_URL = `${ASSET_ROOT}model-manifest.json`;
-
-const projects = [
-  { name: 'Ignis', href: 'projeto-ignis.html', color: 0xff7a35, position: new THREE.Vector3(-6.6, 0, -8.8) },
-  { name: 'MC Bem Estar', href: 'projeto-mc-bem-estar.html', color: 0xd8a84c, position: new THREE.Vector3(-2.2, 0, -10.2) },
-  { name: 'Pão de Cleide', href: 'projeto-pao-de-cleide.html', color: 0xd49061, position: new THREE.Vector3(2.2, 0, -10.2) },
-  { name: 'Amanda Construction', href: 'projeto-amanda.html', color: 0xe34a5c, position: new THREE.Vector3(6.6, 0, -8.8) }
+/* Gallery pilot: rooms stay inside the same WebGL scene. New room builders can be
+   registered in ROOM_BUILDERS without changing the character or camera. */
+const CHARACTER_ASSETS = 'assets/3d/character/';
+const ROOM_BUILDERS = { ignis: buildIgnisRoom };
+const PROJECTS = [
+  { id: 'ignis', name: 'Ignis', color: 0xff813b, x: -7.1, z: -10.1, page: 'projeto-ignis.html' },
+  { id: 'mc', name: 'MC Bem Estar', color: 0xd7b16a, x: -2.35, z: -10.1, page: 'projeto-mc-bem-estar.html' },
+  { id: 'pao', name: 'Pão de Cleide', color: 0xd99870, x: 2.35, z: -10.1, page: 'projeto-pao-de-cleide.html' },
+  { id: 'amanda', name: 'Amanda Construction', color: 0xe66069, x: 7.1, z: -10.1, page: 'projeto-amanda.html' }
 ];
-
-const canvas = document.getElementById('scene3d');
-const loading = document.getElementById('experienceLoading');
-const loadingBar = document.getElementById('loadingBar');
-const loadingStatus = document.getElementById('loadingStatus');
-const errorPanel = document.getElementById('experienceError');
-const errorText = document.getElementById('experienceErrorText');
-const retryButton = document.getElementById('retry3d');
-const hud = document.getElementById('experienceHud');
-const hudProject = document.getElementById('hudProject');
-const hudProjectName = document.getElementById('hudProjectName');
-const hudProjectHint = document.getElementById('hudProjectHint');
-const mobileControls = document.getElementById('mobileControls');
-const mobileEnter = document.getElementById('mobileEnter');
-const portalTransition = document.getElementById('portalTransition');
-
-let renderer;
-let scene;
-let camera;
-let clock;
-let mixer;
-let characterRoot;
-let modelObject;
-let activeAction;
-let idleAction;
-let walkAction;
-let diveAction;
-let nearestProject = null;
-let controlsLocked = false;
-let initialized = false;
-let rafId = 0;
+const IGNIS_MEDIA = [
+  { image: 'assets/ignis-dashboard.webp', title: 'Painel de consumo', description: 'Visão geral de eficiência, consumo, metas, reincidências e desempenho por operação e equipamento.' },
+  { image: 'assets/ignis-comparativo.webp', title: 'Comparativo de períodos', description: 'Comparação de vários períodos simultaneamente, com evolução de indicadores e desempenho por operação.' },
+  { image: 'assets/ignis-abastecimentos.webp', title: 'Gestão de abastecimentos', description: 'Consulta, importação, filtros, edição e rastreabilidade dos registros utilizados nas análises.' },
+  { image: 'assets/ignis-maquinas.webp', title: 'Cadastro de equipamentos', description: 'Gestão de máquinas, modelos, operações, metas individuais, consumo e situação de cada ativo.' },
+  { image: 'assets/ignis-relatorios.webp', title: 'Análise e relatórios', description: 'Configuração por período e tipo de frota, agrupamento por operação e preparação de relatórios executivos.' },
+  { image: 'assets/ignis-km.webp', title: 'Comparativo entre sistemas', description: 'Importação de duas fontes, regras de tolerância e classificação automática de divergências e exceções.' }
+];
+const $ = id => document.getElementById(id);
+const canvas = $('scene3d');
+const loading = $('experienceLoading');
+const loadingBar = $('loadingBar');
+const loadingStatus = $('loadingStatus');
+const errorPanel = $('experienceError');
+const hud = $('experienceHud');
+const hudProject = $('hudProject');
+const hudProjectName = $('hudProjectName');
+const hudProjectHint = $('hudProjectHint');
+const mobileControls = $('mobileControls');
+const mobileEnter = $('mobileEnter');
+const portalTransition = $('portalTransition');
+const currentRoom = $('currentRoom');
+const resetCameraButton = $('resetCamera');
+const lightbox = $('imageLightbox');
+const lightboxImage = $('lightboxImage');
+const lightboxTitle = $('lightboxTitle');
+const lightboxDescription = $('lightboxDescription');
+const imageHint = $('imageHint');
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const lowPower = window.matchMedia('(pointer: coarse)').matches || window.innerWidth < 800;
 const keys = new Set();
-const portalGroups = [];
-
+const pointers = new Map();
+const raycaster = new THREE.Raycaster();
+const normalizedPointer = new THREE.Vector2();
 const movement = new THREE.Vector3();
-const cameraTarget = new THREE.Vector3();
-const desiredCamera = new THREE.Vector3();
+const lookAtPoint = new THREE.Vector3();
+const cameraDesired = new THREE.Vector3();
+const direction = new THREE.Vector3();
+const planeNormal = new THREE.Vector3();
+const clipPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 1000);
+let renderer, scene, camera, clock, mixer, characterRoot, modelObject;
+let idleAction, walkAction, diveAction, activeAction;
+let hallGroup, roomGroup, activeWorld = 'hall', nearestPortal = null;
+let roomLoaded = false, roomLoading = null, busy = false, transition = null;
+let elapsedTime = 0, previousFocus = null;
+let cameraYaw = 0, cameraElevation = 0.46, cameraDistance = 7.6;
+let cameraDrag = null, pinchDistance = 0;
+const hallPortals = [], roomPortals = [], screens = [];
+let currentCanvasTextures = [];
+const cameraLimits = {
+  hall: { minX: -11.25, maxX: 11.25, minZ: -12.65, maxZ: 9.5 },
+  ignis: { minX: -9.0, maxX: 9.0, minZ: -11.8, maxZ: 9.4 }
+};
 
-function setProgress(value, text) {
-  loadingBar.style.width = `${Math.max(2, Math.min(100, value))}%`;
-  if (text) loadingStatus.textContent = text;
+function setProgress(value, message) {
+  loadingBar.style.width = `${THREE.MathUtils.clamp(value, 2, 100)}%`;
+  if (message) loadingStatus.textContent = message;
 }
-
-function showError(message) {
+function fail(message) {
   loading.hidden = true;
-  errorText.textContent = message;
+  $('experienceErrorText').textContent = message;
   errorPanel.hidden = false;
 }
-
-function cleanup() {
-  if (rafId) cancelAnimationFrame(rafId);
-  rafId = 0;
-  keys.clear();
-  controlsLocked = false;
-  nearestProject = null;
-  initialized = false;
-  if (renderer) {
-    renderer.dispose();
-    renderer.domElement.replaceWith(renderer.domElement.cloneNode());
-  }
+function mat(color, options = {}) {
+  return new THREE.MeshStandardMaterial({ color, metalness: 0.74, roughness: 0.29, ...options });
 }
-
+function addBox(parent, size, position, material, shadow = false) {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material);
+  mesh.position.set(...position);
+  mesh.castShadow = shadow && !lowPower;
+  mesh.receiveShadow = true;
+  parent.add(mesh);
+  return mesh;
+}
+function addLine(parent, points, radius, color, emissiveIntensity = 1.9) {
+  const path = new THREE.CatmullRomCurve3(points.map(p => new THREE.Vector3(...p)));
+  const material = new THREE.MeshBasicMaterial({ color, toneMapped: false });
+  const line = new THREE.Mesh(new THREE.TubeGeometry(path, Math.max(12, points.length * 5), radius, 6, false), material);
+  line.userData.baseIntensity = emissiveIntensity;
+  parent.add(line);
+  return line;
+}
+function canvasLabel(title, detail, color = '#72ddff', width = 1024, height = 256) {
+  const c = document.createElement('canvas');
+  c.width = width; c.height = height;
+  const context = c.getContext('2d');
+  context.fillStyle = 'rgba(6, 14, 27, .96)';
+  context.fillRect(0, 0, width, height);
+  context.fillStyle = color;
+  context.fillRect(0, 0, 9, height);
+  context.strokeStyle = 'rgba(194, 226, 255, .25)';
+  context.lineWidth = 3;
+  context.strokeRect(2, 2, width - 4, height - 4);
+  const titleSize = title.length > 24 ? 43 : title.length > 17 ? 54 : 69;
+  context.fillStyle = '#f5f9ff';
+  context.font = `700 ${titleSize}px Arial, sans-serif`;
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.fillText(title, width / 2, height * .41, width - 90);
+  context.font = '600 31px Arial, sans-serif';
+  context.fillStyle = '#a8bfd6';
+  context.fillText(detail, width / 2, height * .77, width - 80);
+  const texture = new THREE.CanvasTexture(c);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = lowPower ? 2 : 4;
+  currentCanvasTextures.push(texture);
+  return texture;
+}
+function addTextPlate(group, title, subtitle, color, position, size) {
+  const texture = canvasLabel(title, subtitle, color);
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(...size), new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide, transparent: true }));
+  mesh.position.set(...position);
+  group.add(mesh);
+  return mesh;
+}
 function createRenderer() {
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.8));
-  renderer.setSize(window.innerWidth, window.innerHeight, false);
-  renderer.shadowMap.enabled = true;
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: !lowPower, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, lowPower ? 1.3 : 1.8));
+  renderer.setSize(innerWidth, innerHeight, false);
+  renderer.localClippingEnabled = true;
+  renderer.shadowMap.enabled = !lowPower;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.08;
+  renderer.toneMappingExposure = 1.16;
 }
-
 function createScene() {
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x030712);
-  scene.fog = new THREE.FogExp2(0x030712, 0.022);
-  camera = new THREE.PerspectiveCamera(52, window.innerWidth / window.innerHeight, 0.05, 120);
-  camera.position.set(0, 4.1, 8.5);
+  scene.background = new THREE.Color(0x030814);
+  scene.fog = new THREE.FogExp2(0x030814, 0.014);
+  camera = new THREE.PerspectiveCamera(56, innerWidth / innerHeight, 0.08, 120);
+  camera.position.set(0, 4.2, 11.5);
   clock = new THREE.Clock();
-
-  scene.add(new THREE.HemisphereLight(0xa9cfff, 0x10111a, 2.1));
-  const keyLight = new THREE.DirectionalLight(0xffffff, 3.2);
-  keyLight.position.set(4, 9, 6);
-  keyLight.castShadow = true;
-  keyLight.shadow.mapSize.set(2048, 2048);
-  keyLight.shadow.camera.left = -16;
-  keyLight.shadow.camera.right = 16;
-  keyLight.shadow.camera.top = 16;
-  keyLight.shadow.camera.bottom = -16;
-  scene.add(keyLight);
-
-  const rim = new THREE.PointLight(0x2f8dff, 70, 22, 2);
-  rim.position.set(0, 3.5, -5);
-  scene.add(rim);
-
-  const ground = new THREE.Mesh(
-    new THREE.CircleGeometry(20, 96),
-    new THREE.MeshStandardMaterial({ color: 0x07101d, roughness: 0.86, metalness: 0.12 })
-  );
-  ground.rotation.x = -Math.PI / 2;
-  ground.receiveShadow = true;
-  scene.add(ground);
-
-  const grid = new THREE.GridHelper(34, 34, 0x1f6bff, 0x183050);
-  grid.material.opacity = 0.22;
-  grid.material.transparent = true;
-  grid.position.y = 0.008;
-  scene.add(grid);
-
-  createBackdrop();
-  projects.forEach(createPortal);
+  scene.add(new THREE.HemisphereLight(0x9bbde7, 0x17121b, 2.1));
+  const sunlight = new THREE.DirectionalLight(0xdce8ff, lowPower ? 1.7 : 2.5);
+  sunlight.position.set(1, 10, 6);
+  sunlight.castShadow = !lowPower;
+  sunlight.shadow.mapSize.set(lowPower ? 512 : 1024, lowPower ? 512 : 1024);
+  sunlight.shadow.camera.left = -15; sunlight.shadow.camera.right = 15;
+  sunlight.shadow.camera.top = 15; sunlight.shadow.camera.bottom = -15;
+  scene.add(sunlight);
+  hallGroup = new THREE.Group();
+  hallGroup.name = 'Hall';
+  scene.add(hallGroup);
+  buildHall(hallGroup);
 }
-
-function createBackdrop() {
-  const ringGeo = new THREE.TorusGeometry(12.8, 0.04, 8, 160);
-  const ringMat = new THREE.MeshBasicMaterial({ color: 0x1f6bff, transparent: true, opacity: 0.16 });
-  const ring = new THREE.Mesh(ringGeo, ringMat);
-  ring.rotation.x = Math.PI / 2;
-  ring.position.y = 0.02;
-  scene.add(ring);
-
-  for (let i = 0; i < 26; i += 1) {
-    const angle = (i / 26) * Math.PI * 2;
-    const radius = 14.5;
-    const pillar = new THREE.Mesh(
-      new THREE.BoxGeometry(0.05, 2.2 + (i % 4) * 0.35, 0.05),
-      new THREE.MeshBasicMaterial({ color: i % 2 ? 0x2f8dff : 0x72ddff, transparent: true, opacity: 0.14 })
-    );
-    pillar.position.set(Math.sin(angle) * radius, pillar.geometry.parameters.height / 2, Math.cos(angle) * radius);
-    scene.add(pillar);
+function createFloor(group, width, depth, tint, accent) {
+  const surface = mat(tint, { roughness: .38, metalness: .54 });
+  addBox(group, [width, .23, depth], [0, -.16, -1.2], surface);
+  const inlay = new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: .46, depthWrite: false });
+  for (const x of [-width / 2 + .5, width / 2 - .5]) addBox(group, [.055, .013, depth - .9], [x, -.033, -1.2], inlay);
+  for (let z = -depth / 2; z <= depth / 2; z += 3.1) addBox(group, [width - 1, .012, .018], [0, -.025, z - 1.2], inlay);
+  const centerStrip = new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: .13, side: THREE.DoubleSide, depthWrite: false });
+  const circle = new THREE.Mesh(new THREE.RingGeometry(3.6, 3.7, 96), centerStrip);
+  circle.rotation.x = -Math.PI / 2;
+  circle.position.y = -.015;
+  circle.position.z = -1.2;
+  group.add(circle);
+}
+function addArchitecture(parent, accent, opts = {}) {
+  const width = opts.width || 24;
+  const depth = opts.depth || 26;
+  const back = opts.back ?? -14;
+  const wall = mat(0x081426, { roughness: .58, metalness: .58, side: THREE.DoubleSide });
+  const metal = mat(0x192c3c, { roughness: .31 });
+  const light = new THREE.MeshBasicMaterial({ color: accent, toneMapped: false });
+  const trim = new THREE.MeshBasicMaterial({ color: accent, transparent: true, opacity: .43, depthWrite: false, toneMapped: false });
+  addBox(parent, [width, 5.8, .4], [0, 2.9, back], wall);
+  addBox(parent, [.4, 5.8, depth], [-width / 2, 2.9, -1.1], wall);
+  addBox(parent, [.4, 5.8, depth], [width / 2, 2.9, -1.1], wall);
+  addBox(parent, [width, .36, depth], [0, 6.12, -1.1], metal);
+  addBox(parent, [width - .6, .06, depth - .6], [0, 5.91, -1.1], trim);
+  const count = opts.columns || 7;
+  for (let i = 0; i < count; i++) {
+    const z = -depth / 2 + i * (depth / (count - 1)) - 1.1;
+    for (const side of [-1, 1]) {
+      const x = side * (width / 2 - .7);
+      addBox(parent, [.74, 5.85, .84], [x, 2.93, z], metal);
+      addBox(parent, [.076, 4.3, .15], [x - side * .41, 2.86, z], light);
+    }
+    addBox(parent, [width - 2, .08, .12], [0, 5.88, z], light);
+  }
+  for (const z of [-7.8, -1.5, 4.8]) {
+    const ceiling = new THREE.Mesh(new THREE.TorusGeometry(3.1, .08, 8, 72), light);
+    ceiling.rotation.x = Math.PI / 2;
+    ceiling.position.set(0, 5.84, z);
+    parent.add(ceiling);
   }
 }
-
-function createLabelTexture(title, color) {
-  const c = document.createElement('canvas');
-  c.width = 1024;
-  c.height = 256;
-  const ctx = c.getContext('2d');
-  ctx.clearRect(0, 0, c.width, c.height);
-  ctx.fillStyle = 'rgba(4, 10, 22, .9)';
-  ctx.fillRect(0, 0, c.width, c.height);
-  ctx.strokeStyle = `#${color.toString(16).padStart(6, '0')}`;
-  ctx.lineWidth = 8;
-  ctx.strokeRect(10, 10, c.width - 20, c.height - 20);
-  ctx.fillStyle = '#f4f8ff';
-  ctx.font = '700 68px Arial';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(title, c.width / 2, c.height / 2 - 10);
-  ctx.fillStyle = '#9db1cb';
-  ctx.font = '500 28px Arial';
-  ctx.fillText('ENTRAR NO PROJETO', c.width / 2, c.height / 2 + 62);
-  const texture = new THREE.CanvasTexture(c);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  return texture;
-}
-
-function createPortal(project) {
+function createPortal(parent, info, returnPortal = false) {
   const group = new THREE.Group();
-  group.position.copy(project.position);
-
-  const frameMaterial = new THREE.MeshStandardMaterial({
-    color: 0x0b1425,
-    metalness: 0.72,
-    roughness: 0.28,
-    emissive: project.color,
-    emissiveIntensity: 0.3
-  });
-  const glowMaterial = new THREE.MeshBasicMaterial({
-    color: project.color,
-    transparent: true,
-    opacity: 0.13,
-    side: THREE.DoubleSide,
-    depthWrite: false
-  });
-  const labelMaterial = new THREE.MeshBasicMaterial({
-    map: createLabelTexture(project.name, project.color),
-    transparent: true,
-    side: THREE.DoubleSide
-  });
-
-  const left = new THREE.Mesh(new THREE.BoxGeometry(0.22, 3.6, 0.24), frameMaterial);
-  const right = left.clone();
-  const top = new THREE.Mesh(new THREE.BoxGeometry(3.15, 0.22, 0.24), frameMaterial);
-  left.position.set(-1.55, 1.8, 0);
-  right.position.set(1.55, 1.8, 0);
-  top.position.set(0, 3.5, 0);
-  const glow = new THREE.Mesh(new THREE.PlaneGeometry(2.86, 3.25), glowMaterial);
-  glow.position.set(0, 1.76, 0.03);
-  const label = new THREE.Mesh(new THREE.PlaneGeometry(2.75, 0.69), labelMaterial);
-  label.position.set(0, 2.35, 0.07);
-
-  [left, right, top].forEach(mesh => {
-    mesh.castShadow = true;
-    group.add(mesh);
-  });
-  group.add(glow, label);
-
-  const halo = new THREE.PointLight(project.color, 32, 7, 2);
-  halo.position.set(0, 1.8, 1.2);
-  group.add(halo);
-
-  group.userData.project = project;
-  group.userData.glow = glow;
-  portalGroups.push(group);
-  scene.add(group);
-}
-
-async function fetchManifest() {
-  const response = await fetch(MANIFEST_URL, { cache: 'no-cache' });
-  if (!response.ok) throw new Error(`Manifesto do personagem não encontrado (${response.status}).`);
-  return response.json();
-}
-
-async function fetchModelParts(parts) {
-  const chunks = [];
-  let loaded = 0;
-  for (let index = 0; index < parts.length; index += 1) {
-    const name = parts[index];
-    setProgress(8 + (index / parts.length) * 35, `Carregando personagem (${index + 1}/${parts.length})...`);
-    const response = await fetch(`${ASSET_ROOT}${name}`);
-    if (!response.ok) throw new Error(`Parte do personagem ausente: ${name}`);
-    const buffer = await response.arrayBuffer();
-    chunks.push(new Uint8Array(buffer));
-    loaded += buffer.byteLength;
+  group.position.set(info.x || 0, 0, info.z);
+  const color = new THREE.Color(info.color);
+  const ready = returnPortal || Boolean(ROOM_BUILDERS[info.id]);
+  const archPoints = [[-1.47, .15, 0], [-1.47, 1.0, 0], [-1.47, 2.2, 0]];
+  for (let i = 0; i <= 16; i++) {
+    const theta = Math.PI - i * Math.PI / 16;
+    archPoints.push([Math.cos(theta) * 1.47, 2.25 + Math.sin(theta) * 1.42, 0]);
   }
-  const merged = new Uint8Array(loaded);
-  let offset = 0;
-  chunks.forEach(chunk => {
-    merged.set(chunk, offset);
-    offset += chunk.byteLength;
-  });
-  return merged.buffer;
+  archPoints.push([1.47, 1.0, 0], [1.47, .15, 0]);
+  addLine(group, archPoints, .16, 0x152b3b);
+  addLine(group, archPoints.map(([x,y]) => [x * .95, y, .15]), .039, info.color);
+  addLine(group, archPoints.map(([x,y]) => [x * 1.08, y, -.06]), .018, info.color);
+  const shape = new THREE.Shape();
+  shape.moveTo(-1.33, .18);
+  shape.lineTo(-1.33, 2.2);
+  shape.absarc(0, 2.2, 1.33, Math.PI, 0, true);
+  shape.lineTo(1.33, .18);
+  shape.closePath();
+  const membrane = new THREE.Mesh(new THREE.ShapeGeometry(shape, 24), new THREE.ShaderMaterial({
+    uniforms: { uTime: { value: 0 }, uColor: { value: color }, uIntensity: { value: ready ? 1 : .27 } },
+    vertexShader: `varying vec2 vCoord; void main() { vCoord = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `uniform float uTime; uniform vec3 uColor; uniform float uIntensity; varying vec2 vCoord;
+      void main(){ vec2 p=vec2(vCoord.x/1.34, (vCoord.y-1.84)/1.9); float r=length(p);
+        float waves=sin(21.0*r-3.6*uTime+sin(atan(p.y,p.x)*5.0+uTime)*1.2);
+        float filaments=sin(p.x*17.0+p.y*11.0+uTime*2.2);
+        float edge=smoothstep(.53,.96,r);
+        float alpha=(.20+.10*waves+.09*filaments+.20*edge)*uIntensity;
+        gl_FragColor=vec4(uColor*(.36+.60*edge), clamp(alpha,.045,.62)); }`,
+    transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending
+  }));
+  membrane.position.z = .035;
+  group.add(membrane);
+  const points = [];
+  const count = lowPower ? 34 : 64;
+  for (let i=0; i<count; i++) {
+    const y = .2 + (i * .61803398875 % 1) * 3.1;
+    const x = Math.sin(i * 15.73) * (y > 2.45 ? .9 : 1.22);
+    points.push(x, y, .09 + Math.cos(i * 3.71) * .27);
+  }
+  const particleGeometry = new THREE.BufferGeometry();
+  particleGeometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+  const particles = new THREE.Points(particleGeometry, new THREE.PointsMaterial({ color: info.color, size: .062, transparent: true, opacity: ready ? .8 : .26, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true }));
+  group.add(particles);
+  addBox(group, [3.5, .19, .62], [0, .03, .03], mat(0x1c3140));
+  addBox(group, [2.7, .035, .22], [0, .16, .14], new THREE.MeshBasicMaterial({ color: info.color }));
+  addTextPlate(group, returnPortal ? 'HALL PRINCIPAL' : info.name, returnPortal ? 'VOLTAR À GALERIA' : (ready ? 'ATRAVESSAR PORTAL' : 'SALA EM PREPARAÇÃO'), `#${color.getHexString()}`, [0, 4.2, .05], [3.5, .89]);
+  if (!lowPower) {
+    const glow = new THREE.PointLight(info.color, ready ? 16 : 6, 6, 2);
+    glow.position.set(0, 1.8, 1.3);
+    group.add(glow);
+  }
+  group.userData = { ...info, isPortal: true, ready, returnPortal, membrane, particles };
+  parent.add(group);
+  return group;
+}
+function buildHall(group) {
+  createFloor(group, 24.3, 27.7, 0x0a1726, 0x2474c5);
+  addArchitecture(group, 0x297fcb, { width: 24.3, depth: 27.7, back: -14.95, columns: 7 });
+  const metal = mat(0x203a4d, { roughness: .28 });
+  const blue = new THREE.MeshBasicMaterial({ color: 0x52a9ec, transparent: true, opacity: .5 });
+  // A raised concentric arrival platform replaces the former floor-wide grid.
+  for (const radius of [2.6, 4.1, 5.4]) {
+    const ring = new THREE.Mesh(new THREE.RingGeometry(radius, radius + .045, 96), blue);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(0, -.011, 3.6);
+    group.add(ring);
+  }
+  for (const x of [-9.65, -5.1, 0, 5.1, 9.65]) {
+    addBox(group, [.085, 4.4, .24], [x, 2.2, -14.6], metal);
+    addBox(group, [.04, 3.1, .04], [x, 2.3, -14.42], blue);
+  }
+  for (const project of PROJECTS) hallPortals.push(createPortal(group, project));
+  const monument = new THREE.Group();
+  monument.position.set(0, 3.45, 1.2);
+  const core = new THREE.Mesh(new THREE.IcosahedronGeometry(.72, 1), mat(0x1376b3, { emissive: 0x1d8cda, emissiveIntensity: .9, metalness: .42, roughness: .27, flatShading: true }));
+  monument.add(core);
+  const orbit = new THREE.Mesh(new THREE.TorusGeometry(1.14, .023, 8, 84), new THREE.MeshBasicMaterial({ color: 0x89d7ff }));
+  orbit.rotation.y = .7;
+  monument.add(orbit);
+  group.add(monument);
+  group.userData.monument = monument;
+  addTextPlate(group, 'EXPERIÊNCIA 3D', 'ESCOLHA UM UNIVERSO', '#72ddff', [0, 4.9, -3.85], [5.7, 1.42]);
 }
 
+// Model normalization and Mixamo-to-Tripo walking clip alignment are preserved.
 function normalizeCharacter(object) {
   // The Tripo FBX uses Z as its vertical axis; the scene uses Y.
   object.rotation.x = -Math.PI / 2;
@@ -334,7 +375,7 @@ function setupAnimations(mainObject, walkingObject) {
 }
 
 function setLocomotion(mode) {
-  if (controlsLocked) return;
+  if (busy) return;
   const next = mode === 'walk' ? walkAction : idleAction;
   if (!next || next === activeAction) return;
   next.reset().play();
@@ -342,200 +383,498 @@ function setLocomotion(mode) {
   activeAction = next;
 }
 
-async function loadCharacter() {
-  const manifest = await fetchManifest();
-  setProgress(7, 'Localizando arquivos do personagem...');
-  const mainBuffer = await fetchModelParts(manifest.modelParts || []);
-  setProgress(48, 'Montando modelo, materiais e texturas...');
 
+async function fetchModelParts(parts) {
+  if (!Array.isArray(parts) || !parts.length) throw new Error('Manifesto sem partes do personagem.');
+  const buffers = [];
+  let bytes = 0;
+  for (let i = 0; i < parts.length; i++) {
+    setProgress(8 + (i / parts.length) * 36, `Carregando personagem (${i + 1}/${parts.length})...`);
+    const response = await fetch(`${CHARACTER_ASSETS}${parts[i]}`);
+    if (!response.ok) throw new Error(`Parte do personagem indisponível: ${parts[i]}`);
+    const chunk = new Uint8Array(await response.arrayBuffer());
+    buffers.push(chunk);
+    bytes += chunk.byteLength;
+  }
+  const data = new Uint8Array(bytes);
+  let offset = 0;
+  for (const b of buffers) { data.set(b, offset); offset += b.byteLength; }
+  return data.buffer;
+}
+async function loadCharacter() {
+  const response = await fetch(`${CHARACTER_ASSETS}model-manifest.json`);
+  if (!response.ok) throw new Error('Manifesto do personagem não encontrado.');
+  const manifest = await response.json();
+  const buffer = await fetchModelParts(manifest.modelParts);
+  setProgress(50, 'Aplicando geometria e texturas do personagem...');
   const manager = new THREE.LoadingManager();
-  manager.onProgress = (_url, loaded, total) => {
-    const textureProgress = total ? loaded / total : 0;
-    setProgress(48 + textureProgress * 28, 'Aplicando texturas e materiais...');
+  manager.onProgress = (_url, done, total) => {
+    setProgress(50 + (total ? done / total : 0) * 27, 'Carregando materiais do personagem...');
   };
   const loader = new FBXLoader(manager);
-  const mainObject = loader.parse(mainBuffer, ASSET_ROOT);
-  normalizeCharacter(mainObject);
-
+  const object = loader.parse(buffer, CHARACTER_ASSETS);
+  normalizeCharacter(object);
   characterRoot = new THREE.Group();
+  characterRoot.name = 'Euler';
   characterRoot.position.set(0, 0, 5.2);
-  characterRoot.add(mainObject);
-  modelObject = mainObject;
+  characterRoot.add(object);
+  modelObject = object;
   scene.add(characterRoot);
-
-  setProgress(78, 'Carregando caminhada...');
-  const walkingObject = await new Promise((resolve, reject) => {
-    loader.load(`${ASSET_ROOT}${manifest.walking || 'Walking.fbx'}`, resolve, undefined, reject);
+  setProgress(80, 'Sincronizando caminhada e animação de mergulho...');
+  const walking = await new Promise((resolve, reject) => loader.load(`${CHARACTER_ASSETS}${manifest.walking || 'Walking.fbx'}`, resolve, undefined, reject));
+  setupAnimations(object, walking);
+  setProgress(96, 'Preparando a galeria...');
+}
+function makeNarrativeTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1400; canvas.height = 490;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#0b1829'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#ff813b'; ctx.fillRect(0, 0, 12, canvas.height);
+  ctx.fillStyle = '#ffb18a'; ctx.font = '700 37px Arial'; ctx.fillText('IGNIS / INTELIGÊNCIA OPERACIONAL', 52, 78);
+  ctx.fillStyle = '#fff6f0'; ctx.font = '700 61px Arial'; ctx.fillText('Dados transformados em decisões.', 52, 162);
+  ctx.fillStyle = '#c3cedc'; ctx.font = '34px Arial';
+  const lines = [
+    'Uma plataforma para importar, tratar e transformar dados de',
+    'abastecimento e operação em indicadores, alertas, comparativos',
+    'e relatórios prontos para tomada de decisão.',
+    'Telas reais do produto, apresentadas com dados protegidos.'
+  ];
+  lines.forEach((line, i) => ctx.fillText(line, 52, 247 + i * 53));
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  currentCanvasTextures.push(texture);
+  return texture;
+}
+async function buildIgnisRoom() {
+  const group = new THREE.Group();
+  group.name = 'Sala Ignis';
+  group.visible = false;
+  createFloor(group, 19.4, 25.5, 0x141a24, 0xd96b35);
+  addArchitecture(group, 0xa74e2f, { width: 19.4, depth: 25.5, back: -13.25, columns: 6 });
+  const amber = new THREE.MeshBasicMaterial({ color: 0xff813b, toneMapped: false });
+  const copper = mat(0x3f2a25, { metalness: .84, roughness: .25 });
+  const glass = mat(0x102a39, { roughness: .14, metalness: .75, transparent: true, opacity: .78 });
+  for (const side of [-1, 1]) {
+    for (const z of [-8.1, -2.2, 3.7]) {
+      addBox(group, [.24, 4.1, 4.75], [side * 9.0, 2.35, z], copper);
+      addBox(group, [.13, 3.8, 4.3], [side * 8.78, 2.35, z], glass);
+      addBox(group, [.07, .07, 4.0], [side * 8.67, 4.45, z], amber);
+    }
+  }
+  const story = new THREE.Mesh(new THREE.PlaneGeometry(7.9, 2.75), new THREE.MeshBasicMaterial({ map: makeNarrativeTexture(), side: THREE.DoubleSide }));
+  story.position.set(0, 3.45, -12.8);
+  group.add(story);
+  const returnInfo = { id: 'hall', name: 'Hall', x: 0, z: 8.8, color: 0x5ac9ff };
+  roomPortals.push(createPortal(group, returnInfo, true));
+  // Visual wayfinding: the central aisle is intentionally clear for movement.
+  for (const x of [-5.4, 5.4]) {
+    const rail = addBox(group, [.065, .09, 18.9], [x, .06, -1.5], new THREE.MeshBasicMaterial({ color: 0x9c5135, transparent: true, opacity: .52 }));
+    rail.userData.decoration = true;
+  }
+  const loader = new THREE.TextureLoader();
+  const outcomes = await Promise.allSettled(IGNIS_MEDIA.map(item => loader.loadAsync(item.image)));
+  const missing = [];
+  for (let i = 0; i < IGNIS_MEDIA.length; i++) {
+    const item = IGNIS_MEDIA[i];
+    const side = i < 3 ? -1 : 1;
+    const z = [-8.1, -2.2, 3.7][i % 3];
+    const panel = new THREE.Group();
+    panel.position.set(side * 8.22, 2.3, z);
+    panel.rotation.y = side === -1 ? Math.PI / 2 : -Math.PI / 2;
+    const frame = mat(0x142639, { metalness: .87, roughness: .17 });
+    addBox(panel, [4.4, 3.35, .19], [0, .05, 0], frame);
+    addBox(panel, [4.24, 2.42, .03], [0, .30, .115], new THREE.MeshBasicMaterial({ color: 0x040912 }));
+    const result = outcomes[i];
+    let imageMaterial;
+    if (result.status === 'fulfilled') {
+      const texture = result.value;
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = lowPower ? 2 : 4;
+      imageMaterial = new THREE.MeshBasicMaterial({ map: texture, toneMapped: false, side: THREE.DoubleSide });
+    } else {
+      missing.push(item.image);
+      imageMaterial = new THREE.MeshBasicMaterial({ color: 0x152235, side: THREE.DoubleSide });
+    }
+    const img = new THREE.Mesh(new THREE.PlaneGeometry(4.05, 2.12), imageMaterial);
+    img.position.set(0, .32, .139);
+    img.userData.screen = item;
+    img.userData.canEnlarge = result.status === 'fulfilled';
+    screens.push(img);
+    panel.add(img);
+    addBox(panel, [4.15, .04, .04], [0, -1.0, .125], amber);
+    addTextPlate(panel, item.title, result.status === 'fulfilled' ? 'TOQUE PARA AMPLIAR' : 'IMAGEM INDISPONÍVEL', '#ffb18a', [0, -1.22, .14], [4.1, .81]);
+    group.add(panel);
+  }
+  if (missing.length) console.warn('[Portfólio 3D] imagens não carregadas:', missing);
+  if (!lowPower) {
+    const ambient = new THREE.PointLight(0xff813b, 30, 17, 2);
+    ambient.position.set(0, 4.8, -4);
+    group.add(ambient);
+  }
+  group.userData.missingImages = missing;
+  return group;
+}
+function showRoomStatus(text) {
+  const status = $('roomStatus');
+  status.textContent = text;
+  status.hidden = !text;
+}
+async function ensureRoom(id) {
+  if (id !== 'ignis' && !ROOM_BUILDERS[id]) throw new Error('Sala ainda não construída.');
+  if (roomLoaded) return roomGroup;
+  if (roomLoading) return roomLoading;
+  roomLoading = (async () => {
+    const group = await ROOM_BUILDERS[id]();
+    scene.add(group);
+    roomGroup = group;
+    roomLoaded = true;
+    return group;
+  })();
+  try { return await roomLoading; }
+  finally { roomLoading = null; }
+}
+function resetCamera() {
+  cameraYaw = 0;
+  cameraElevation = .46;
+  cameraDistance = lowPower ? 7.2 : 7.7;
+}
+function applyCharacterClipping(enable, portal) {
+  if (!modelObject) return;
+  if (enable && portal) {
+    const sign = portal.userData.returnPortal ? -1 : 1;
+    planeNormal.set(0, 0, sign);
+    clipPlane.setFromNormalAndCoplanarPoint(planeNormal, portal.position);
+  }
+  modelObject.traverse(child => {
+    if (!child.isMesh && !child.isSkinnedMesh) return;
+    const materials = Array.isArray(child.material) ? child.material : [child.material];
+    materials.forEach(material => {
+      if (!material) return;
+      material.clippingPlanes = enable ? [clipPlane] : null;
+      material.clipShadows = enable;
+      material.needsUpdate = true;
+    });
   });
-  setupAnimations(mainObject, walkingObject);
-  setProgress(92, 'Finalizando controles e portais...');
 }
-
+function startDive() {
+  if (!diveAction) return;
+  diveAction.reset().setEffectiveWeight(1).setEffectiveTimeScale(1).play();
+  if (activeAction && activeAction !== diveAction) activeAction.crossFadeTo(diveAction, .23, false);
+  activeAction = diveAction;
+}
+function endDive() {
+  if (diveAction) diveAction.stop();
+  if (walkAction) walkAction.stop();
+  if (idleAction) idleAction.reset().setEffectiveWeight(1).play();
+  activeAction = idleAction || null;
+}
+async function enterPortal() {
+  if (!nearestPortal || !nearestPortal.userData.ready || busy || !characterRoot || !lightbox.hidden) return;
+  const portal = nearestPortal;
+  busy = true;
+  keys.clear();
+  mobileEnter.disabled = true;
+  try {
+    if (!portal.userData.returnPortal) {
+      showRoomStatus('Preparando a sala Ignis e suas imagens...');
+      await ensureRoom(portal.userData.id);
+      showRoomStatus('');
+    }
+    // The dive is started only once textures have finished loading.
+    const duration = diveAction?.getClip()?.duration || 1.8;
+    const animationDuration = THREE.MathUtils.clamp(duration, 1.1, 2.4);
+    const sign = portal.userData.returnPortal ? 1 : -1;
+    const source = characterRoot.position.clone();
+    const target = new THREE.Vector3(portal.position.x, 0, portal.position.z + sign * 2.1);
+    transition = { portal, source, target, sign, elapsed: 0, duration: animationDuration, switched: false };
+    const desiredFacing = sign === -1 ? Math.PI : 0;
+    characterRoot.rotation.y = desiredFacing;
+    applyCharacterClipping(true, portal);
+    startDive();
+    hudProject.classList.remove('visible');
+  } catch (error) {
+    busy = false;
+    showRoomStatus('');
+    console.error('[Portfólio 3D] Falha ao preparar a sala:', error);
+    showRoomStatus('Não foi possível carregar a sala. Tente entrar novamente.');
+  }
+}
+function activateWorld(nextWorld) {
+  const goHome = nextWorld === 'hall';
+  activeWorld = nextWorld;
+  hallGroup.visible = goHome;
+  if (roomGroup) roomGroup.visible = !goHome;
+  scene.background.set(goHome ? 0x030814 : 0x100c0e);
+  scene.fog.color.set(goHome ? 0x030814 : 0x100c0e);
+  scene.fog.density = goHome ? .014 : .012;
+  characterRoot.position.set(0, 0, goHome ? 5.1 : 0);
+  characterRoot.rotation.y = Math.PI;
+  resetCamera();
+  currentRoom.textContent = goHome ? 'HALL PRINCIPAL' : 'SALA IGNIS';
+  $('roomDescription').textContent = goHome ? 'Explore os portais da galeria' : 'Explore as seis telas reais do Ignis';
+  imageHint.hidden = goHome;
+  showRoomStatus('');
+}
+function updateTransition(delta) {
+  if (!transition) return;
+  const t = transition;
+  t.elapsed += delta;
+  const progress = THREE.MathUtils.clamp(t.elapsed / t.duration, 0, 1);
+  const traversal = THREE.MathUtils.smoothstep(progress, .05, .96);
+  characterRoot.position.lerpVectors(t.source, t.target, traversal);
+  if (progress >= .79) portalTransition.classList.add('active');
+  if (t.elapsed >= t.duration + .26 && !t.switched) {
+    t.switched = true;
+    applyCharacterClipping(false);
+    endDive();
+    activateWorld(t.portal.userData.returnPortal ? 'hall' : t.portal.userData.id);
+    transition = null;
+    window.setTimeout(() => {
+      portalTransition.classList.remove('active');
+      busy = false;
+      nearestPortal = null;
+    }, reducedMotion ? 80 : 360);
+  }
+}
 function isMovementPressed() {
-  return keys.has('KeyW') || keys.has('ArrowUp') || keys.has('KeyS') || keys.has('ArrowDown') || keys.has('KeyA') || keys.has('ArrowLeft') || keys.has('KeyD') || keys.has('ArrowRight');
+  return ['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowLeft','ArrowDown','ArrowRight'].some(key => keys.has(key));
 }
-
 function updateMovement(delta) {
-  if (!characterRoot || controlsLocked) return;
+  if (!characterRoot || busy || !lightbox.hidden) return;
   movement.set(0, 0, 0);
   if (keys.has('KeyW') || keys.has('ArrowUp')) movement.z -= 1;
   if (keys.has('KeyS') || keys.has('ArrowDown')) movement.z += 1;
   if (keys.has('KeyA') || keys.has('ArrowLeft')) movement.x -= 1;
   if (keys.has('KeyD') || keys.has('ArrowRight')) movement.x += 1;
-
-  if (movement.lengthSq() > 0) {
+  if (movement.lengthSq()) {
     movement.normalize();
-    const speed = 3.15;
-    characterRoot.position.addScaledVector(movement, speed * delta);
-    characterRoot.position.x = THREE.MathUtils.clamp(characterRoot.position.x, -10.8, 10.8);
-    characterRoot.position.z = THREE.MathUtils.clamp(characterRoot.position.z, -12.5, 8.5);
-    const targetRotation = Math.atan2(movement.x, movement.z);
-    let diff = targetRotation - characterRoot.rotation.y;
-    diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+    characterRoot.position.addScaledVector(movement, delta * 3.15);
+    const bounds = cameraLimits[activeWorld];
+    characterRoot.position.x = THREE.MathUtils.clamp(characterRoot.position.x, bounds.minX, bounds.maxX);
+    characterRoot.position.z = THREE.MathUtils.clamp(characterRoot.position.z, bounds.minZ, bounds.maxZ);
+    const heading = Math.atan2(movement.x, movement.z);
+    const diff = Math.atan2(Math.sin(heading - characterRoot.rotation.y), Math.cos(heading - characterRoot.rotation.y));
     characterRoot.rotation.y += diff * Math.min(1, delta * 12);
     setLocomotion('walk');
-  } else {
-    setLocomotion('idle');
-  }
+  } else setLocomotion('idle');
 }
-
 function updateCamera(delta) {
-  if (!characterRoot) return;
-  cameraTarget.copy(characterRoot.position).add(new THREE.Vector3(0, 1.25, 0));
-  desiredCamera.copy(characterRoot.position).add(new THREE.Vector3(0, 4.15, 7.4));
-  const lerp = 1 - Math.pow(0.0007, delta);
-  camera.position.lerp(desiredCamera, lerp);
-  camera.lookAt(cameraTarget);
+  if (!characterRoot || !camera) return;
+  lookAtPoint.copy(characterRoot.position).add(new THREE.Vector3(0, 1.28, 0));
+  const planar = Math.cos(cameraElevation) * cameraDistance;
+  cameraDesired.set(
+    lookAtPoint.x + Math.sin(cameraYaw) * planar,
+    lookAtPoint.y + Math.sin(cameraElevation) * cameraDistance,
+    lookAtPoint.z + Math.cos(cameraYaw) * planar
+  );
+  const bounds = cameraLimits[activeWorld];
+  cameraDesired.x = THREE.MathUtils.clamp(cameraDesired.x, bounds.minX - .2, bounds.maxX + .2);
+  cameraDesired.z = THREE.MathUtils.clamp(cameraDesired.z, bounds.minZ - .2, bounds.maxZ + .2);
+  cameraDesired.y = THREE.MathUtils.clamp(cameraDesired.y, 1.05, 5.65);
+  const follow = 1 - Math.exp(-7 * delta);
+  camera.position.lerp(cameraDesired, follow);
+  camera.lookAt(lookAtPoint);
 }
-
-function updatePortals(elapsed) {
-  if (!characterRoot) return;
+function updatePortalProximity(time) {
+  if (!characterRoot || busy) return;
   let best = null;
-  let bestDistance = Infinity;
-  portalGroups.forEach((group, index) => {
-    const distance = characterRoot.position.distanceTo(group.position);
-    const glow = group.userData.glow;
-    if (glow) {
-      glow.material.opacity = 0.11 + Math.sin(elapsed * 2.4 + index) * 0.025 + (distance < 3 ? 0.1 : 0);
-    }
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      best = group.userData.project;
-    }
+  let bestDistance = 3.05;
+  const portals = activeWorld === 'hall' ? hallPortals : roomPortals;
+  portals.forEach((portal, index) => {
+    const data = portal.userData;
+    data.membrane.material.uniforms.uTime.value = time;
+    data.particles.position.y = (reducedMotion ? 0 : Math.sin(time * .72 + index) * .055);
+    const front = characterRoot.position.z - portal.position.z;
+    const sideValid = data.returnPortal ? front < .35 : front > -.35;
+    const d = characterRoot.position.distanceTo(portal.position);
+    if (sideValid && d < bestDistance) { bestDistance = d; best = portal; }
   });
-
-  nearestProject = bestDistance < 2.75 ? best : null;
-  hudProject.classList.toggle('visible', Boolean(nearestProject));
-  mobileEnter.disabled = !nearestProject || controlsLocked;
-  if (nearestProject) {
-    hudProjectName.textContent = nearestProject.name;
-    hudProjectHint.textContent = 'Pressione E para entrar';
+  nearestPortal = best;
+  hudProject.classList.toggle('visible', Boolean(best));
+  mobileEnter.disabled = !best?.userData.ready;
+  if (best) {
+    hudProjectName.textContent = best.userData.name;
+    hudProjectHint.textContent = best.userData.ready
+      ? (best.userData.returnPortal ? 'Pressione E para voltar ao hall' : 'Pressione E para atravessar')
+      : 'Sala 3D em preparação';
+    mobileEnter.textContent = best.userData.returnPortal ? 'Voltar' : 'Entrar';
   }
 }
-
-function enterProject() {
-  if (!nearestProject || controlsLocked) return;
-  controlsLocked = true;
+function updateScreens() {
+  if (activeWorld !== 'ignis' || busy || !characterRoot || !lightbox.hidden) { imageHint.classList.remove('visible'); return; }
+  let nearest = null;
+  let bestDistance = 3.55;
+  for (const screen of screens) {
+    screen.getWorldPosition(direction);
+    const dist = direction.distanceTo(characterRoot.position);
+    if (dist < bestDistance && screen.userData.canEnlarge) { bestDistance = dist; nearest = screen; }
+  }
+  imageHint.classList.toggle('visible', Boolean(nearest));
+  if (nearest) {
+    $('imageHintTitle').textContent = nearest.userData.screen.title;
+    $('imageHintDescription').textContent = nearest.userData.screen.description;
+    $('imageHintButton').onclick = () => openImage(nearest.userData.screen);
+  }
+}
+function openImage(item) {
+  if (!item || busy) return;
+  previousFocus = document.activeElement;
+  lightboxImage.src = item.image;
+  lightboxImage.alt = `Captura real do Ignis: ${item.title}`;
+  lightboxTitle.textContent = item.title;
+  lightboxDescription.textContent = item.description;
+  lightbox.hidden = false;
   keys.clear();
-  mobileEnter.disabled = true;
-  hudProjectHint.textContent = 'Entrando...';
-
-  if (diveAction) {
-    diveAction.reset();
-    diveAction.setEffectiveWeight(1);
-    diveAction.setEffectiveTimeScale(1);
-    diveAction.play();
-    if (activeAction && activeAction !== diveAction) activeAction.crossFadeTo(diveAction, 0.16, false);
-    activeAction = diveAction;
+  $('lightboxClose').focus();
+}
+function closeImage() {
+  lightbox.hidden = true;
+  lightboxImage.removeAttribute('src');
+  if (previousFocus?.focus) previousFocus.focus();
+}
+function clickScreen(clientX, clientY) {
+  if (activeWorld !== 'ignis' || busy || !lightbox.hidden) return;
+  const bounds = canvas.getBoundingClientRect();
+  normalizedPointer.set(((clientX - bounds.left) / bounds.width) * 2 - 1, -((clientY - bounds.top) / bounds.height) * 2 + 1);
+  raycaster.setFromCamera(normalizedPointer, camera);
+  const hit = raycaster.intersectObjects(screens, false).find(intersection => intersection.object.userData.canEnlarge);
+  if (hit) openImage(hit.object.userData.screen);
+}
+function moveCamera(dx, dy) {
+  cameraYaw -= dx * .006;
+  cameraElevation = THREE.MathUtils.clamp(cameraElevation + dy * .0045, .13, 1.07);
+}
+function getPinchGap() {
+  const pair = [...pointers.values()];
+  if (pair.length < 2) return 0;
+  return Math.hypot(pair[0].x - pair[1].x, pair[0].y - pair[1].y);
+}
+function onPointerDown(event) {
+  if (busy || !lightbox.hidden) return;
+  if (event.pointerType === 'mouse' && event.button !== 0) return;
+  canvas.setPointerCapture?.(event.pointerId);
+  pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  if (pointers.size === 1) cameraDrag = { x: event.clientX, y: event.clientY, lastX: event.clientX, lastY: event.clientY, moved: false, pinched: false };
+  if (pointers.size === 2) { pinchDistance = getPinchGap(); if (cameraDrag) cameraDrag.pinched = true; }
+}
+function onPointerMove(event) {
+  const prev = pointers.get(event.pointerId);
+  if (!prev) return;
+  pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  if (pointers.size >= 2) {
+    const gap = getPinchGap();
+    if (pinchDistance > 0 && gap > 0) cameraDistance = THREE.MathUtils.clamp(cameraDistance * pinchDistance / gap, 2.25, 11.7);
+    pinchDistance = gap;
+    if (cameraDrag) cameraDrag.pinched = true;
+  } else if (cameraDrag) {
+    const dx = event.clientX - cameraDrag.lastX;
+    const dy = event.clientY - cameraDrag.lastY;
+    if (Math.hypot(event.clientX - cameraDrag.x, event.clientY - cameraDrag.y) > 6) cameraDrag.moved = true;
+    if (cameraDrag.moved) moveCamera(dx, dy);
+    cameraDrag.lastX = event.clientX;
+    cameraDrag.lastY = event.clientY;
   }
-
-  const duration = diveAction?.getClip()?.duration || 1.7;
-  const transitionDelay = Math.max(600, Math.min(1700, duration * 650));
-  window.setTimeout(() => portalTransition.classList.add('active'), Math.max(250, transitionDelay - 350));
-  window.setTimeout(() => {
-    window.location.href = nearestProject.href;
-  }, transitionDelay + 350);
 }
-
-function handleKeyDown(event) {
-  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(event.code)) event.preventDefault();
-  keys.add(event.code);
-  if (event.code === 'KeyE') enterProject();
+function onPointerUp(event) {
+  if (!pointers.has(event.pointerId)) return;
+  pointers.delete(event.pointerId);
+  if (pointers.size === 0) {
+    if (event.type === 'pointerup' && cameraDrag && !cameraDrag.moved && !cameraDrag.pinched) clickScreen(event.clientX, event.clientY);
+    cameraDrag = null;
+    pinchDistance = 0;
+  } else {
+    if (cameraDrag) {
+      cameraDrag.pinched = true;
+      const remaining = [...pointers.values()][0];
+      cameraDrag.lastX = remaining.x;
+      cameraDrag.lastY = remaining.y;
+    }
+    pinchDistance = getPinchGap();
+  }
 }
-
-function handleKeyUp(event) {
-  keys.delete(event.code);
-}
-
 function bindControls() {
-  window.addEventListener('keydown', handleKeyDown, { passive: false });
-  window.addEventListener('keyup', handleKeyUp);
+  window.addEventListener('keydown', event => {
+    if (event.code === 'Escape' && !lightbox.hidden) { closeImage(); return; }
+    if (!lightbox.hidden || busy || event.repeat && event.code === 'KeyE') return;
+    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(event.code)) event.preventDefault();
+    if (event.code === 'KeyE') enterPortal();
+    else if (event.code === 'KeyC') resetCamera();
+    else keys.add(event.code);
+  }, { passive: false });
+  window.addEventListener('keyup', event => keys.delete(event.code));
   window.addEventListener('blur', () => keys.clear());
-  window.addEventListener('resize', onResize);
-  mobileEnter.addEventListener('click', enterProject);
-
+  window.addEventListener('resize', () => {
+    if (!camera || !renderer) return;
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, innerWidth < 800 ? 1.3 : 1.8));
+    renderer.setSize(innerWidth, innerHeight, false);
+  });
+  mobileEnter.addEventListener('click', enterPortal);
+  resetCameraButton.addEventListener('click', resetCamera);
+  canvas.addEventListener('wheel', event => {
+    event.preventDefault();
+    if (busy || !lightbox.hidden) return;
+    cameraDistance = THREE.MathUtils.clamp(cameraDistance * Math.exp(event.deltaY * .0011), 2.25, 11.7);
+  }, { passive: false });
+  canvas.addEventListener('pointerdown', onPointerDown);
+  canvas.addEventListener('pointermove', onPointerMove);
+  canvas.addEventListener('pointerup', onPointerUp);
+  canvas.addEventListener('pointercancel', onPointerUp);
+  canvas.addEventListener('lostpointercapture', onPointerUp);
   document.querySelectorAll('[data-key]').forEach(button => {
-    const key = button.dataset.key;
-    const down = event => {
-      event.preventDefault();
-      keys.add(key);
-      button.classList.add('active');
-    };
-    const up = event => {
-      event.preventDefault();
-      keys.delete(key);
-      button.classList.remove('active');
-    };
+    const code = button.dataset.key;
+    const down = event => { event.preventDefault(); button.setPointerCapture?.(event.pointerId); keys.add(code); button.classList.add('active'); };
+    const up = event => { event.preventDefault(); keys.delete(code); button.classList.remove('active'); };
     button.addEventListener('pointerdown', down);
     button.addEventListener('pointerup', up);
     button.addEventListener('pointercancel', up);
-    button.addEventListener('pointerleave', up);
+    button.addEventListener('lostpointercapture', up);
   });
+  $('lightboxClose').addEventListener('click', closeImage);
+  lightbox.addEventListener('click', event => { if (event.target === lightbox) closeImage(); });
 }
-
-function onResize() {
-  if (!renderer || !camera) return;
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, window.innerWidth < 760 ? 1.35 : 1.8));
-  renderer.setSize(window.innerWidth, window.innerHeight, false);
-}
-
 function animate() {
-  rafId = requestAnimationFrame(animate);
-  const delta = Math.min(clock.getDelta(), 0.05);
-  const elapsed = clock.elapsedTime;
+  requestAnimationFrame(animate);
+  const delta = Math.min(clock.getDelta(), .05);
+  elapsedTime += delta;
   if (mixer) mixer.update(delta);
-  updateMovement(delta);
+  if (transition) updateTransition(delta);
+  else updateMovement(delta);
   updateCamera(delta);
-  updatePortals(elapsed);
+  if (hallGroup.visible && hallGroup.userData.monument && !reducedMotion) {
+    const model = hallGroup.userData.monument;
+    model.rotation.y += delta * .12;
+    model.position.y = 3.45 + Math.sin(elapsedTime * .65) * .13;
+  }
+  if (!busy) updatePortalProximity(elapsedTime);
+  else {
+    const portal = transition?.portal;
+    if (portal) portal.userData.membrane.material.uniforms.uTime.value = elapsedTime;
+  }
+  updateScreens();
   renderer.render(scene, camera);
 }
-
 async function init() {
-  if (initialized) return;
-  initialized = true;
-  errorPanel.hidden = true;
-  loading.hidden = false;
-  setProgress(2, 'Inicializando ambiente...');
   try {
     createRenderer();
     createScene();
     bindControls();
     await loadCharacter();
-    setProgress(100, 'Pronto.');
-    await new Promise(resolve => setTimeout(resolve, 250));
+    resetCamera();
+    setProgress(100, 'Galeria pronta.');
     loading.hidden = true;
     hud.hidden = false;
     mobileControls.hidden = false;
+    currentRoom.textContent = 'HALL PRINCIPAL';
     clock.start();
     animate();
-  } catch (error) {
-    console.error(error);
-    showError(error?.message || 'Falha inesperada ao carregar a experiência 3D.');
+  } catch (err) {
+    console.error('[Portfólio 3D] inicialização:', err);
+    fail(err?.message || 'Falha ao preparar a galeria 3D.');
   }
 }
-
-retryButton.addEventListener('click', () => window.location.reload());
+$('retry3d').addEventListener('click', () => location.reload());
 init();
 
