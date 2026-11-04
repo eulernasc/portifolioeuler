@@ -52,10 +52,23 @@ const direction = new THREE.Vector3();
 const viewForward = new THREE.Vector3();
 const viewRight = new THREE.Vector3();
 const worldUp = new THREE.Vector3(0, 1, 0);
+// Reused scratch objects avoid per-frame allocations on mobile while adjusting idle arms.
+const armLeftPosition = new THREE.Vector3();
+const armRightPosition = new THREE.Vector3();
+const armElbowPosition = new THREE.Vector3();
+const armDirection = new THREE.Vector3();
+const armOutward = new THREE.Vector3();
+const armTarget = new THREE.Vector3();
+const armAxis = new THREE.Vector3();
+const armParentRotation = new THREE.Quaternion();
+const armInverseParentRotation = new THREE.Quaternion();
+const armLocalRotation = new THREE.Quaternion();
 const planeNormal = new THREE.Vector3();
 const clipPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 1000);
 let renderer, scene, camera, clock, mixer, characterRoot, modelObject;
+let characterMotion = null;
 let idleAction, walkAction, diveAction, activeAction;
+let idleArmBones = null, idleArmBlend = 0;
 let hallGroup, roomGroup, activeWorld = 'hall', nearestPortal = null;
 let roomLoaded = false, roomLoading = null, busy = false, transition = null;
 let elapsedTime = 0, previousFocus = null;
@@ -351,13 +364,81 @@ function alignWalkingClip(sourceClip, target, source) {
   return clip;
 }
 
+// The Tripo dive has baked horizontal displacement on the hips. If it is
+// combined with the portal path, the character appears to dive too late.
+// Keep the pose and vertical motion, but let the portal path own X/Y travel
+// (the original Tripo rig uses Z-up before normalizeCharacter()).
+function stabilizeDiveClip(source) {
+  if (!source) return null;
+  const clip = source.clone();
+  for (const track of clip.tracks) {
+    if (!/mixamorigHips\.position$/i.test(track.name)) continue;
+    const values = track.values;
+    if (values.length < 3) continue;
+    const originalX = values[0];
+    const originalY = values[1];
+    for (let i = 0; i < values.length; i += 3) {
+      values[i] = originalX;
+      values[i + 1] = originalY;
+    }
+  }
+  return clip;
+}
+
+function findRigBone(root, suffix) {
+  let result = root.getObjectByName(`mixamorig${suffix}`);
+  if (result) return result;
+  root.traverse(node => {
+    if (!result && node.isBone && node.name.replace(/[^a-z]/gi, '').toLowerCase().endsWith(`mixamorig${suffix}`.toLowerCase())) result = node;
+  });
+  return result;
+}
+
+// Lift only the upper arms a little while standing still. This is an additive
+// bone correction AFTER mixer.update, not a change to Tripo/Mixamo alignment.
+function relaxIdleArms(delta) {
+  // Never modify the arms during walking crossfades, the dive or landing.
+  if (busy || transition) { idleArmBlend = 0; return; }
+  const shouldRelax = activeAction === idleAction;
+  idleArmBlend = THREE.MathUtils.damp(idleArmBlend, shouldRelax ? 1 : 0, 7, delta);
+  if (!idleArmBones || idleArmBlend < .005) return;
+  const { left, right, leftElbow, rightElbow } = idleArmBones;
+  modelObject.updateMatrixWorld(true);
+  left.getWorldPosition(armLeftPosition);
+  right.getWorldPosition(armRightPosition);
+  for (const [arm, elbow, sign] of [[left, leftElbow, 1], [right, rightElbow, -1]]) {
+    if (!arm.parent || !elbow) continue;
+    elbow.getWorldPosition(armElbowPosition);
+    armDirection.copy(armElbowPosition).sub(sign === 1 ? armLeftPosition : armRightPosition);
+    if (armDirection.lengthSq() < 1e-5) continue;
+    armDirection.normalize();
+    armOutward.copy(armLeftPosition).sub(armRightPosition).multiplyScalar(sign);
+    armOutward.y = 0;
+    if (armOutward.lengthSq() < 1e-5) continue;
+    armOutward.normalize();
+    // A small outward offset creates daylight between the arm and torso.
+    armTarget.copy(armDirection).addScaledVector(armOutward, idleArmBlend * .29).normalize();
+    armAxis.crossVectors(armDirection, armTarget);
+    if (armAxis.lengthSq() < 1e-8) continue;
+    armAxis.normalize();
+    const angle = Math.acos(THREE.MathUtils.clamp(armDirection.dot(armTarget), -1, 1));
+    arm.parent.getWorldQuaternion(armParentRotation);
+    armLocalRotation.setFromAxisAngle(armAxis, angle);
+    // World correction converted to the bone parent's local frame.
+    armInverseParentRotation.copy(armParentRotation).invert();
+    armLocalRotation.premultiply(armInverseParentRotation).multiply(armParentRotation);
+    arm.quaternion.premultiply(armLocalRotation).normalize();
+    arm.updateMatrixWorld(true);
+  }
+}
+
 function setupAnimations(mainObject, walkingObject) {
   mixer = new THREE.AnimationMixer(mainObject);
   const mainClips = mainObject.animations || [];
   const walkingClips = walkingObject?.animations || [];
 
   const idleClip = clipByName(mainClips, ['idle', 'ocioso']) || mainClips[0] || null;
-  const diveClip = clipByName(mainClips, ['dive', 'mergul']) || mainClips.find(clip => clip !== idleClip) || null;
+  const diveClip = stabilizeDiveClip(clipByName(mainClips, ['dive', 'mergul']) || mainClips.find(clip => clip !== idleClip) || null);
   const walkClip = walkingClips[0] ? alignWalkingClip(walkingClips[0], mainObject, walkingObject) : null;
 
   if (idleClip) idleAction = mixer.clipAction(idleClip, mainObject);
@@ -367,6 +448,12 @@ function setupAnimations(mainObject, walkingObject) {
     diveAction.clampWhenFinished = true;
   }
   if (walkClip) walkAction = mixer.clipAction(walkClip, mainObject);
+  const left = findRigBone(mainObject, 'LeftArm');
+  const right = findRigBone(mainObject, 'RightArm');
+  const leftElbow = findRigBone(mainObject, 'LeftForeArm');
+  const rightElbow = findRigBone(mainObject, 'RightForeArm');
+  idleArmBones = left && right && leftElbow && rightElbow ? { left, right, leftElbow, rightElbow } : null;
+  if (!idleArmBones) console.warn('[Portfólio 3D] ossos dos braços indisponíveis; correção de idle ignorada.');
 
   if (idleAction) {
     activeAction = idleAction;
@@ -420,7 +507,15 @@ async function loadCharacter() {
   characterRoot = new THREE.Group();
   characterRoot.name = 'Euler';
   characterRoot.position.set(0, 0, 5.2);
-  characterRoot.add(object);
+  // Separate the arrival-roll pivot from the Tripo model orientation.
+  // Pivot about the torso rather than the feet to avoid sinking into the floor.
+  characterMotion = new THREE.Group();
+  characterMotion.position.y = .92;
+  const modelAnchor = new THREE.Group();
+  modelAnchor.position.y = -.92;
+  modelAnchor.add(object);
+  characterMotion.add(modelAnchor);
+  characterRoot.add(characterMotion);
   modelObject = object;
   scene.add(characterRoot);
   setProgress(80, 'Sincronizando caminhada e animação de mergulho...');
@@ -592,30 +687,34 @@ async function enterPortal() {
       await ensureRoom(portal.userData.id);
       showRoomStatus('');
     }
-    // The FBX dive is ~2.71 s. Let it reach the leap before crossing the membrane.
-    // The entry point can be very close to the portal, so step back for a visible run-up.
-    const duration = diveAction?.getClip()?.duration || 2.7;
+    const duration = diveAction?.getClip()?.duration || 2.71;
     const sign = portal.userData.returnPortal ? 1 : -1;
     const source = characterRoot.position.clone();
-    const staging = new THREE.Vector3(portal.position.x, 0, portal.position.z - sign * 3.35);
-    const target = new THREE.Vector3(portal.position.x, 0, portal.position.z + sign * 2.2);
-    const stagingDistance = source.distanceTo(staging);
-    const stageDuration = stagingDistance > .16 ? THREE.MathUtils.clamp(stagingDistance / 3.15, .28, 1.25) : 0;
+    const depth = (portal.position.z - source.z) * sign;
+    // Only walk towards the portal when already far away. Never walk backward
+    // or teleport outward if the player pressed E close to the membrane.
+    const approachNeeded = depth > 2.65 || (depth > .12 && Math.abs(source.x - portal.position.x) > .55);
+    const staging = approachNeeded
+      ? new THREE.Vector3(portal.position.x, 0, portal.position.z - sign * Math.min(depth, 2.35))
+      : source.clone();
+    const distance = source.distanceTo(staging);
+    const approachDuration = distance > .12 ? THREE.MathUtils.clamp(distance / 3.1, .18, 1.25) : 0;
     transition = {
-      portal, source, staging, target, sign, elapsed: 0,
-      phase: stageDuration ? 'staging' : 'dive', stageDuration,
-      duration, switched: false
+      portal, sign, source, staging, duration,
+      outsideDistance: Math.max(.28, (portal.position.z - staging.z) * sign),
+      elapsed: 0, phase: approachDuration ? 'approach' : 'dive',
+      approachDuration, switched: false, landingDuration: reducedMotion ? .2 : .94
     };
-    // Film the run-up from behind. Room return uses the opposite camera heading.
     cameraYaw = sign === -1 ? 0 : Math.PI;
-    cameraElevation = .41;
-    cameraDistance = lowPower ? 7.8 : 8.45;
-    if (stageDuration) {
-      const retreat = staging.clone().sub(source);
-      characterRoot.rotation.y = Math.atan2(retreat.x, retreat.z);
+    cameraElevation = .40;
+    cameraDistance = lowPower ? 8.0 : 8.7;
+    characterMotion.rotation.x = 0;
+    characterMotion.position.y = .92;
+    if (approachDuration) {
+      const heading = staging.clone().sub(source);
+      characterRoot.rotation.y = Math.atan2(heading.x, heading.z);
       startStagingWalk();
     } else {
-      characterRoot.position.copy(staging);
       characterRoot.rotation.y = sign === -1 ? Math.PI : 0;
       applyCharacterClipping(true, portal);
       startDive();
@@ -623,6 +722,7 @@ async function enterPortal() {
     hudProject.classList.remove('visible');
   } catch (error) {
     busy = false;
+    transition = null;
     showRoomStatus('');
     console.error('[Portfólio 3D] Falha ao preparar a sala:', error);
     showRoomStatus('Não foi possível carregar a sala. Tente entrar novamente.');
@@ -651,10 +751,10 @@ function updateTransition(delta) {
   if (!transition) return;
   const t = transition;
   t.elapsed += delta;
-  if (t.phase === 'staging') {
-    const preparation = THREE.MathUtils.clamp(t.elapsed / t.stageDuration, 0, 1);
-    characterRoot.position.lerpVectors(t.source, t.staging, THREE.MathUtils.smoothstep(preparation, 0, 1));
-    if (preparation >= 1) {
+  if (t.phase === 'approach') {
+    const p = THREE.MathUtils.clamp(t.elapsed / t.approachDuration, 0, 1);
+    characterRoot.position.lerpVectors(t.source, t.staging, THREE.MathUtils.smoothstep(p, 0, 1));
+    if (p >= 1) {
       characterRoot.position.copy(t.staging);
       characterRoot.rotation.y = t.sign === -1 ? Math.PI : 0;
       t.phase = 'dive';
@@ -664,23 +764,50 @@ function updateTransition(delta) {
     }
     return;
   }
-  const progress = THREE.MathUtils.clamp(t.elapsed / t.duration, 0, 1);
-  // First show the actual dive anticipation, then travel through the portal.
-  // Clipping removes the parts of the model that pass through its surface.
-  const traversal = THREE.MathUtils.smoothstep(progress, .23, .96);
-  characterRoot.position.lerpVectors(t.staging, t.target, traversal);
-  if (progress >= .83) portalTransition.classList.add('active');
-  if (t.elapsed >= t.duration + .23 && !t.switched) {
-    t.switched = true;
-    applyCharacterClipping(false);
-    endDive();
-    activateWorld(t.portal.userData.returnPortal ? 'hall' : t.portal.userData.id);
-    transition = null;
-    window.setTimeout(() => {
+  if (t.phase === 'dive') {
+    const p = THREE.MathUtils.clamp(t.elapsed / t.duration, 0, 1);
+    // The provided dive FBX leans head-first around 1.2-1.4 seconds (~45-50%).
+    // Put the *portal plane* at that key pose, not at the end of the animation.
+    // The hips' baked horizontal travel is removed in stabilizeDiveClip().
+    const approach = THREE.MathUtils.smoothstep(p, .045, .46);
+    const departure = THREE.MathUtils.smoothstep(p, .46, .78);
+    const z = t.portal.position.z - t.sign * t.outsideDistance * (1 - approach) + t.sign * 2.45 * departure;
+    characterRoot.position.set(
+      THREE.MathUtils.lerp(t.staging.x, t.portal.position.x, approach),
+      0,
+      z
+    );
+    if (p >= .77) portalTransition.classList.add('active');
+    if (p >= .95 && !t.switched) {
+      t.switched = true;
+      applyCharacterClipping(false);
+      endDive();
+      activateWorld(t.portal.userData.returnPortal ? 'hall' : t.portal.userData.id);
+      t.phase = 'landing';
+      t.elapsed = 0;
+      t.landingOrigin = characterRoot.position.clone();
+      // A fast exit roll uses a separate rig pivot and does not affect the
+      // FBX orientation or walking animation. Fade the portal glare promptly.
       portalTransition.classList.remove('active');
+    }
+    return;
+  }
+  if (t.phase === 'landing') {
+    const p = THREE.MathUtils.clamp(t.elapsed / t.landingDuration, 0, 1);
+    const path = THREE.MathUtils.smoothstep(p, .04, .94);
+    characterRoot.position.copy(t.landingOrigin);
+    if (!reducedMotion) {
+      characterRoot.position.z -= 1.35 * path;
+      characterMotion.rotation.x = 2 * Math.PI * THREE.MathUtils.smoothstep(p, .03, .9);
+      characterMotion.position.y = .92 + .06 * Math.sin(Math.PI * p) ** 2;
+    }
+    if (p >= 1) {
+      characterMotion.rotation.x = 0;
+      characterMotion.position.y = .92;
       busy = false;
       nearestPortal = null;
-    }, reducedMotion ? 80 : 360);
+      transition = null;
+    }
   }
 }
 function isMovementPressed() {
@@ -894,6 +1021,7 @@ function animate() {
   if (mixer) mixer.update(delta);
   if (transition) updateTransition(delta);
   else updateMovement(delta);
+  relaxIdleArms(delta);
   updateCamera(delta);
   if (hallGroup.visible && hallGroup.userData.monument && !reducedMotion) {
     const model = hallGroup.userData.monument;
