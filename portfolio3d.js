@@ -4,6 +4,8 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 /* Gallery pilot: rooms stay inside the same WebGL scene. New room builders can be
    registered in ROOM_BUILDERS without changing the character or camera. */
 const CHARACTER_ASSETS = 'assets/3d/character/';
+const ROLL_ANIMATION = `${CHARACTER_ASSETS}Stand-To-Roll.fbx`;
+const ROLL_LEAD_IN = .40; // Skip the standing wind-up: the character arrives mid-dive.
 const ROOM_BUILDERS = { ignis: buildIgnisRoom };
 const PROJECTS = [
   { id: 'ignis', name: 'Ignis', color: 0xff813b, x: -7.1, z: -10.1, page: 'projeto-ignis.html' },
@@ -52,23 +54,13 @@ const direction = new THREE.Vector3();
 const viewForward = new THREE.Vector3();
 const viewRight = new THREE.Vector3();
 const worldUp = new THREE.Vector3(0, 1, 0);
-// Reused scratch objects avoid per-frame allocations on mobile while adjusting idle arms.
-const armLeftPosition = new THREE.Vector3();
-const armRightPosition = new THREE.Vector3();
-const armElbowPosition = new THREE.Vector3();
-const armDirection = new THREE.Vector3();
-const armOutward = new THREE.Vector3();
-const armTarget = new THREE.Vector3();
-const armAxis = new THREE.Vector3();
-const armParentRotation = new THREE.Quaternion();
-const armInverseParentRotation = new THREE.Quaternion();
-const armLocalRotation = new THREE.Quaternion();
+// Scratch quaternions are allocated only when the animation clips are prepared.
 const planeNormal = new THREE.Vector3();
 const clipPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 1000);
 let renderer, scene, camera, clock, mixer, characterRoot, modelObject;
 let characterMotion = null;
-let idleAction, walkAction, diveAction, activeAction;
-let idleArmBones = null, idleArmBlend = 0;
+let idleAction, walkAction, diveAction, rollAction, activeAction;
+let rollLoadPromise = null, rollUnavailable = false;
 let hallGroup, roomGroup, activeWorld = 'hall', nearestPortal = null;
 let roomLoaded = false, roomLoading = null, busy = false, transition = null;
 let elapsedTime = 0, previousFocus = null;
@@ -385,51 +377,94 @@ function stabilizeDiveClip(source) {
   return clip;
 }
 
-function findRigBone(root, suffix) {
-  let result = root.getObjectByName(`mixamorig${suffix}`);
-  if (result) return result;
-  root.traverse(node => {
-    if (!result && node.isBone && node.name.replace(/[^a-z]/gi, '').toLowerCase().endsWith(`mixamorig${suffix}`.toLowerCase())) result = node;
-  });
+// The walking animation has the upright shoulder and torso posture selected
+// by the user. Construct a relaxed standing clip from opposite walking phases.
+// This avoids modifying shoulder world rotations on every frame (the previous
+// approach lowered the shoulders and made idle/crossfade less predictable).
+function makeUprightIdle(originalIdle, walkClip) {
+  if (!originalIdle || !walkClip) return originalIdle;
+  const result = originalIdle.clone();
+  const walkTracks = new Map(walkClip.tracks.map(track => [track.name, track]));
+  const upperBody = /^mixamorig(?:Spine|Spine1|Spine2|LeftShoulder|RightShoulder|LeftArm|RightArm|LeftForeArm|RightForeArm)\.quaternion$/;
+  let replaced = 0;
+  for (const track of result.tracks) {
+    if (!upperBody.test(track.name)) continue;
+    const walk = walkTracks.get(track.name);
+    if (!walk || walk.getValueSize() !== 4) continue;
+    const interpolant = walk.createInterpolant();
+    const qA = new THREE.Quaternion().fromArray(interpolant.evaluate(walkClip.duration * .18));
+    const qB = new THREE.Quaternion().fromArray(interpolant.evaluate(walkClip.duration * .68));
+    qA.slerp(qB, .5).normalize();
+    // Preserve a small part of the original standing movement, but make
+    // shoulders and spine match the walk's upright neutral reference.
+    for (let i = 0; i < track.values.length; i += 4) {
+      const q = new THREE.Quaternion().fromArray(track.values, i);
+      q.slerp(qA, .92).normalize().toArray(track.values, i);
+    }
+    replaced++;
+  }
+  console.info(`[Portfólio 3D] posture idle: ${replaced} ossos alinhados à caminhada`);
   return result;
 }
 
-// Lift only the upper arms a little while standing still. This is an additive
-// bone correction AFTER mixer.update, not a change to Tripo/Mixamo alignment.
-function relaxIdleArms(delta) {
-  // Never modify the arms during walking crossfades, the dive or landing.
-  if (busy || transition) { idleArmBlend = 0; return; }
-  const shouldRelax = activeAction === idleAction;
-  idleArmBlend = THREE.MathUtils.damp(idleArmBlend, shouldRelax ? 1 : 0, 7, delta);
-  if (!idleArmBones || idleArmBlend < .005) return;
-  const { left, right, leftElbow, rightElbow } = idleArmBones;
-  modelObject.updateMatrixWorld(true);
-  left.getWorldPosition(armLeftPosition);
-  right.getWorldPosition(armRightPosition);
-  for (const [arm, elbow, sign] of [[left, leftElbow, 1], [right, rightElbow, -1]]) {
-    if (!arm.parent || !elbow) continue;
-    elbow.getWorldPosition(armElbowPosition);
-    armDirection.copy(armElbowPosition).sub(sign === 1 ? armLeftPosition : armRightPosition);
-    if (armDirection.lengthSq() < 1e-5) continue;
-    armDirection.normalize();
-    armOutward.copy(armLeftPosition).sub(armRightPosition).multiplyScalar(sign);
-    armOutward.y = 0;
-    if (armOutward.lengthSq() < 1e-5) continue;
-    armOutward.normalize();
-    // A small outward offset creates daylight between the arm and torso.
-    armTarget.copy(armDirection).addScaledVector(armOutward, idleArmBlend * .29).normalize();
-    armAxis.crossVectors(armDirection, armTarget);
-    if (armAxis.lengthSq() < 1e-8) continue;
-    armAxis.normalize();
-    const angle = Math.acos(THREE.MathUtils.clamp(armDirection.dot(armTarget), -1, 1));
-    arm.parent.getWorldQuaternion(armParentRotation);
-    armLocalRotation.setFromAxisAngle(armAxis, angle);
-    // World correction converted to the bone parent's local frame.
-    armInverseParentRotation.copy(armParentRotation).invert();
-    armLocalRotation.premultiply(armInverseParentRotation).multiply(armParentRotation);
-    arm.quaternion.premultiply(armLocalRotation).normalize();
-    arm.updateMatrixWorld(true);
+// The Mixamo In Place roll still contains a backtracking hips curve.
+// Remove X/Z translation IN THE SOURCE Y-up rig, preserving vertical Y and
+// all bone rotations. The scene moves characterRoot forward monotonically.
+function stabilizeRollClip(originalRoll) {
+  const clip = originalRoll.clone();
+  const hip = clip.tracks.find(track => /mixamorigHips\.position$/i.test(track.name));
+  if (!hip) throw new Error('A animação de rolamento não possui a trajetória do quadril esperada.');
+  const x = hip.values[0];
+  const z = hip.values[2];
+  for (let i = 0; i < hip.values.length; i += 3) {
+    hip.values[i] = x;
+    hip.values[i + 2] = z;
   }
+  return clip;
+}
+
+// The source Mixamo clip can start at a different heading than Walking.fbx.
+// Align the first hips rotation to the already-correct walking reference,
+// then retain the full spin encoded by the roll's quaternion keyframes.
+function matchRollHeading(rollClip, walkingClip) {
+  const key = 'mixamorigHips.quaternion';
+  const roll = rollClip.tracks.find(track => track.name === key);
+  const walk = walkingClip?.tracks.find(track => track.name === key);
+  if (!roll || !walk) throw new Error('Não foi possível alinhar a orientação do rolamento à caminhada.');
+  const anchor = new THREE.Quaternion().fromArray(walk.values);
+  const first = new THREE.Quaternion().fromArray(roll.values);
+  const adjustment = anchor.multiply(first.invert()).normalize();
+  const sample = new THREE.Quaternion();
+  for (let i = 0; i < roll.values.length; i += 4) {
+    sample.fromArray(roll.values, i).premultiply(adjustment).normalize().toArray(roll.values, i);
+  }
+  return rollClip;
+}
+
+// Lazy-load the 514 KB FBX on the first portal interaction. If it cannot be
+// loaded, entering/leaving rooms still works without an artificial roll.
+async function ensureRollAnimation() {
+  if (rollAction || rollUnavailable) return rollAction;
+  if (!rollLoadPromise) {
+    rollLoadPromise = new Promise((resolve, reject) =>
+      new FBXLoader().load(ROLL_ANIMATION, resolve, undefined, reject)
+    ).then(rollObject => {
+      const source = rollObject.animations?.[0];
+      if (!source) throw new Error('FBX sem animação de rolamento.');
+      const inPlace = stabilizeRollClip(source);
+      const clip = matchRollHeading(alignWalkingClip(inPlace, modelObject, rollObject), walkAction?.getClip());
+      rollAction = mixer.clipAction(clip, modelObject);
+      rollAction.setLoop(THREE.LoopOnce, 1);
+      rollAction.clampWhenFinished = true;
+      console.info(`[Portfólio 3D] rolamento real: ${clip.duration.toFixed(2)} s`);
+      return rollAction;
+    }).catch(error => {
+      console.warn('[Portfólio 3D] rolamento FBX indisponível, mantendo transição segura:', error);
+      rollUnavailable = true;
+      return null;
+    });
+  }
+  return rollLoadPromise;
 }
 
 function setupAnimations(mainObject, walkingObject) {
@@ -437,9 +472,10 @@ function setupAnimations(mainObject, walkingObject) {
   const mainClips = mainObject.animations || [];
   const walkingClips = walkingObject?.animations || [];
 
-  const idleClip = clipByName(mainClips, ['idle', 'ocioso']) || mainClips[0] || null;
-  const diveClip = stabilizeDiveClip(clipByName(mainClips, ['dive', 'mergul']) || mainClips.find(clip => clip !== idleClip) || null);
+  const originalIdle = clipByName(mainClips, ['idle', 'ocioso']) || mainClips[0] || null;
+  const diveClip = stabilizeDiveClip(clipByName(mainClips, ['dive', 'mergul']) || mainClips.find(clip => clip !== originalIdle) || null);
   const walkClip = walkingClips[0] ? alignWalkingClip(walkingClips[0], mainObject, walkingObject) : null;
+  const idleClip = makeUprightIdle(originalIdle, walkClip);
 
   if (idleClip) idleAction = mixer.clipAction(idleClip, mainObject);
   if (diveClip) {
@@ -448,12 +484,6 @@ function setupAnimations(mainObject, walkingObject) {
     diveAction.clampWhenFinished = true;
   }
   if (walkClip) walkAction = mixer.clipAction(walkClip, mainObject);
-  const left = findRigBone(mainObject, 'LeftArm');
-  const right = findRigBone(mainObject, 'RightArm');
-  const leftElbow = findRigBone(mainObject, 'LeftForeArm');
-  const rightElbow = findRigBone(mainObject, 'RightForeArm');
-  idleArmBones = left && right && leftElbow && rightElbow ? { left, right, leftElbow, rightElbow } : null;
-  if (!idleArmBones) console.warn('[Portfólio 3D] ossos dos braços indisponíveis; correção de idle ignorada.');
 
   if (idleAction) {
     activeAction = idleAction;
@@ -675,6 +705,22 @@ function endDive() {
   if (idleAction) idleAction.reset().setEffectiveWeight(1).play();
   activeAction = idleAction || null;
 }
+function beginRealRoll() {
+  if (!rollAction) { endDive(); return false; }
+  rollAction.reset().setEffectiveWeight(1).setEffectiveTimeScale(1).play();
+  rollAction.time = Math.min(ROLL_LEAD_IN, rollAction.getClip().duration * .20);
+  if (activeAction && activeAction !== rollAction) activeAction.crossFadeTo(rollAction, .14, false);
+  activeAction = rollAction;
+  return true;
+}
+function finishRealRoll() {
+  if (!rollAction) { endDive(); return; }
+  if (idleAction) {
+    idleAction.reset().setEffectiveWeight(1).play();
+    rollAction.crossFadeTo(idleAction, .18, false);
+    activeAction = idleAction;
+  }
+}
 async function enterPortal() {
   if (!nearestPortal || !nearestPortal.userData.ready || busy || !characterRoot || !lightbox.hidden) return;
   const portal = nearestPortal;
@@ -685,8 +731,12 @@ async function enterPortal() {
     if (!portal.userData.returnPortal) {
       showRoomStatus('Preparando a sala Ignis e suas imagens...');
       await ensureRoom(portal.userData.id);
-      showRoomStatus('');
     }
+    if (!rollAction && !rollUnavailable) {
+      showRoomStatus('Carregando a animação de rolamento...');
+      await ensureRollAnimation();
+    }
+    showRoomStatus('');
     const duration = diveAction?.getClip()?.duration || 2.71;
     const sign = portal.userData.returnPortal ? 1 : -1;
     const source = characterRoot.position.clone();
@@ -703,7 +753,7 @@ async function enterPortal() {
       portal, sign, source, staging, duration,
       outsideDistance: Math.max(.28, (portal.position.z - staging.z) * sign),
       elapsed: 0, phase: approachDuration ? 'approach' : 'dive',
-      approachDuration, switched: false, landingDuration: reducedMotion ? .2 : .94
+      approachDuration, switched: false, landingDuration: rollAction ? rollAction.getClip().duration - Math.min(ROLL_LEAD_IN, rollAction.getClip().duration * .20) : .22
     };
     cameraYaw = sign === -1 ? 0 : Math.PI;
     cameraElevation = .40;
@@ -781,27 +831,25 @@ function updateTransition(delta) {
     if (p >= .95 && !t.switched) {
       t.switched = true;
       applyCharacterClipping(false);
-      endDive();
       activateWorld(t.portal.userData.returnPortal ? 'hall' : t.portal.userData.id);
+      beginRealRoll();
       t.phase = 'landing';
       t.elapsed = 0;
       t.landingOrigin = characterRoot.position.clone();
-      // A fast exit roll uses a separate rig pivot and does not affect the
-      // FBX orientation or walking animation. Fade the portal glare promptly.
+      // The animation performs the real somersault. Scene movement is separate
+      // and only goes forward, never inheriting Mixamo's final hips retreat.
       portalTransition.classList.remove('active');
     }
     return;
   }
   if (t.phase === 'landing') {
     const p = THREE.MathUtils.clamp(t.elapsed / t.landingDuration, 0, 1);
-    const path = THREE.MathUtils.smoothstep(p, .04, .94);
+    const path = THREE.MathUtils.smoothstep(p, .02, .84);
     characterRoot.position.copy(t.landingOrigin);
-    if (!reducedMotion) {
-      characterRoot.position.z -= 1.35 * path;
-      characterMotion.rotation.x = 2 * Math.PI * THREE.MathUtils.smoothstep(p, .03, .9);
-      characterMotion.position.y = .92 + .06 * Math.sin(Math.PI * p) ** 2;
-    }
+    // Advance smoothly through the roll; do not reverse on the stand-up frames.
+    if (rollAction && !reducedMotion) characterRoot.position.z -= 1.35 * path;
     if (p >= 1) {
+      finishRealRoll();
       characterMotion.rotation.x = 0;
       characterMotion.position.y = .92;
       busy = false;
@@ -1021,7 +1069,6 @@ function animate() {
   if (mixer) mixer.update(delta);
   if (transition) updateTransition(delta);
   else updateMovement(delta);
-  relaxIdleArms(delta);
   updateCamera(delta);
   if (hallGroup.visible && hallGroup.userData.monument && !reducedMotion) {
     const model = hallGroup.userData.monument;
