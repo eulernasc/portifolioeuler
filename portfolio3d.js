@@ -49,6 +49,9 @@ const movement = new THREE.Vector3();
 const lookAtPoint = new THREE.Vector3();
 const cameraDesired = new THREE.Vector3();
 const direction = new THREE.Vector3();
+const viewForward = new THREE.Vector3();
+const viewRight = new THREE.Vector3();
+const worldUp = new THREE.Vector3(0, 1, 0);
 const planeNormal = new THREE.Vector3();
 const clipPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 1000);
 let renderer, scene, camera, clock, mixer, characterRoot, modelObject;
@@ -557,6 +560,14 @@ function applyCharacterClipping(enable, portal) {
     });
   });
 }
+// A short, visible run-up gives the dive room to start before the portal plane.
+function startStagingWalk() {
+  const next = walkAction || idleAction;
+  if (!next) return;
+  next.reset().setEffectiveWeight(1).setEffectiveTimeScale(1).play();
+  if (activeAction && activeAction !== next) activeAction.crossFadeTo(next, .16, false);
+  activeAction = next;
+}
 function startDive() {
   if (!diveAction) return;
   diveAction.reset().setEffectiveWeight(1).setEffectiveTimeScale(1).play();
@@ -581,17 +592,34 @@ async function enterPortal() {
       await ensureRoom(portal.userData.id);
       showRoomStatus('');
     }
-    // The dive is started only once textures have finished loading.
-    const duration = diveAction?.getClip()?.duration || 1.8;
-    const animationDuration = THREE.MathUtils.clamp(duration, 1.1, 2.4);
+    // The FBX dive is ~2.71 s. Let it reach the leap before crossing the membrane.
+    // The entry point can be very close to the portal, so step back for a visible run-up.
+    const duration = diveAction?.getClip()?.duration || 2.7;
     const sign = portal.userData.returnPortal ? 1 : -1;
     const source = characterRoot.position.clone();
-    const target = new THREE.Vector3(portal.position.x, 0, portal.position.z + sign * 2.1);
-    transition = { portal, source, target, sign, elapsed: 0, duration: animationDuration, switched: false };
-    const desiredFacing = sign === -1 ? Math.PI : 0;
-    characterRoot.rotation.y = desiredFacing;
-    applyCharacterClipping(true, portal);
-    startDive();
+    const staging = new THREE.Vector3(portal.position.x, 0, portal.position.z - sign * 3.35);
+    const target = new THREE.Vector3(portal.position.x, 0, portal.position.z + sign * 2.2);
+    const stagingDistance = source.distanceTo(staging);
+    const stageDuration = stagingDistance > .16 ? THREE.MathUtils.clamp(stagingDistance / 3.15, .28, 1.25) : 0;
+    transition = {
+      portal, source, staging, target, sign, elapsed: 0,
+      phase: stageDuration ? 'staging' : 'dive', stageDuration,
+      duration, switched: false
+    };
+    // Film the run-up from behind. Room return uses the opposite camera heading.
+    cameraYaw = sign === -1 ? 0 : Math.PI;
+    cameraElevation = .41;
+    cameraDistance = lowPower ? 7.8 : 8.45;
+    if (stageDuration) {
+      const retreat = staging.clone().sub(source);
+      characterRoot.rotation.y = Math.atan2(retreat.x, retreat.z);
+      startStagingWalk();
+    } else {
+      characterRoot.position.copy(staging);
+      characterRoot.rotation.y = sign === -1 ? Math.PI : 0;
+      applyCharacterClipping(true, portal);
+      startDive();
+    }
     hudProject.classList.remove('visible');
   } catch (error) {
     busy = false;
@@ -611,6 +639,9 @@ function activateWorld(nextWorld) {
   characterRoot.position.set(0, 0, goHome ? 5.1 : 0);
   characterRoot.rotation.y = Math.PI;
   resetCamera();
+  // Reposition the camera behind the new spawn before releasing movement keys.
+  // Otherwise the old camera view can make W/A/S/D seem rotated after a portal.
+  updateCamera(0, true);
   currentRoom.textContent = goHome ? 'HALL PRINCIPAL' : 'SALA IGNIS';
   $('roomDescription').textContent = goHome ? 'Explore os portais da galeria' : 'Explore as seis telas reais do Ignis';
   imageHint.hidden = goHome;
@@ -620,11 +651,26 @@ function updateTransition(delta) {
   if (!transition) return;
   const t = transition;
   t.elapsed += delta;
+  if (t.phase === 'staging') {
+    const preparation = THREE.MathUtils.clamp(t.elapsed / t.stageDuration, 0, 1);
+    characterRoot.position.lerpVectors(t.source, t.staging, THREE.MathUtils.smoothstep(preparation, 0, 1));
+    if (preparation >= 1) {
+      characterRoot.position.copy(t.staging);
+      characterRoot.rotation.y = t.sign === -1 ? Math.PI : 0;
+      t.phase = 'dive';
+      t.elapsed = 0;
+      applyCharacterClipping(true, t.portal);
+      startDive();
+    }
+    return;
+  }
   const progress = THREE.MathUtils.clamp(t.elapsed / t.duration, 0, 1);
-  const traversal = THREE.MathUtils.smoothstep(progress, .05, .96);
-  characterRoot.position.lerpVectors(t.source, t.target, traversal);
-  if (progress >= .79) portalTransition.classList.add('active');
-  if (t.elapsed >= t.duration + .26 && !t.switched) {
+  // First show the actual dive anticipation, then travel through the portal.
+  // Clipping removes the parts of the model that pass through its surface.
+  const traversal = THREE.MathUtils.smoothstep(progress, .23, .96);
+  characterRoot.position.lerpVectors(t.staging, t.target, traversal);
+  if (progress >= .83) portalTransition.classList.add('active');
+  if (t.elapsed >= t.duration + .23 && !t.switched) {
     t.switched = true;
     applyCharacterClipping(false);
     endDive();
@@ -642,11 +688,16 @@ function isMovementPressed() {
 }
 function updateMovement(delta) {
   if (!characterRoot || busy || !lightbox.hidden) return;
-  movement.set(0, 0, 0);
-  if (keys.has('KeyW') || keys.has('ArrowUp')) movement.z -= 1;
-  if (keys.has('KeyS') || keys.has('ArrowDown')) movement.z += 1;
-  if (keys.has('KeyA') || keys.has('ArrowLeft')) movement.x -= 1;
-  if (keys.has('KeyD') || keys.has('ArrowRight')) movement.x += 1;
+  // Use the actual camera view so forward/left/right remain correct after
+  // entering a room, orbiting the camera, or having it constrained by a wall.
+  const forward = Number(keys.has('KeyW') || keys.has('ArrowUp')) - Number(keys.has('KeyS') || keys.has('ArrowDown'));
+  const strafe = Number(keys.has('KeyD') || keys.has('ArrowRight')) - Number(keys.has('KeyA') || keys.has('ArrowLeft'));
+  camera.getWorldDirection(viewForward);
+  viewForward.y = 0;
+  if (viewForward.lengthSq() < 1e-4) viewForward.set(-Math.sin(cameraYaw), 0, -Math.cos(cameraYaw));
+  viewForward.normalize();
+  viewRight.crossVectors(viewForward, worldUp).normalize();
+  movement.copy(viewForward).multiplyScalar(forward).addScaledVector(viewRight, strafe);
   if (movement.lengthSq()) {
     movement.normalize();
     characterRoot.position.addScaledVector(movement, delta * 3.15);
@@ -659,7 +710,7 @@ function updateMovement(delta) {
     setLocomotion('walk');
   } else setLocomotion('idle');
 }
-function updateCamera(delta) {
+function updateCamera(delta, snap = false) {
   if (!characterRoot || !camera) return;
   lookAtPoint.copy(characterRoot.position).add(new THREE.Vector3(0, 1.28, 0));
   const planar = Math.cos(cameraElevation) * cameraDistance;
@@ -673,13 +724,14 @@ function updateCamera(delta) {
   cameraDesired.z = THREE.MathUtils.clamp(cameraDesired.z, bounds.minZ - .2, bounds.maxZ + .2);
   cameraDesired.y = THREE.MathUtils.clamp(cameraDesired.y, 1.05, 5.65);
   const follow = 1 - Math.exp(-7 * delta);
-  camera.position.lerp(cameraDesired, follow);
+  if (snap) camera.position.copy(cameraDesired);
+  else camera.position.lerp(cameraDesired, follow);
   camera.lookAt(lookAtPoint);
 }
 function updatePortalProximity(time) {
   if (!characterRoot || busy) return;
   let best = null;
-  let bestDistance = 3.05;
+  let bestDistance = 3.8;
   const portals = activeWorld === 'hall' ? hallPortals : roomPortals;
   portals.forEach((portal, index) => {
     const data = portal.userData;
@@ -877,4 +929,3 @@ async function init() {
 }
 $('retry3d').addEventListener('click', () => location.reload());
 init();
-
