@@ -5,14 +5,18 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
    registered in ROOM_BUILDERS without changing the character or camera. */
 const CHARACTER_ASSETS = 'assets/3d/character/';
 const ROLL_ANIMATION = `${CHARACTER_ASSETS}Stand-To-Roll.fbx`;
-// The supplied Stand-To-Roll.fbx begins with a standing anticipation.
-// Its hips rotate noticeably only after ~0.35-0.45 s (measured in the FBX).
-// Skip this pre-roll lead-in, retaining the actual roll and recovery.
-const ROLL_LEAD_IN = 0.44;
-const DIVE_START_MOVEMENT = 0.36; // Take off visibly before moving into the arch.
-const DIVE_REACH_PORTAL = 0.74;   // The hips reach the plane after the dive pose begins.
-const DIVE_FINISH_CROSSING = 0.96;
+// Travel in the supplied dive FBX starts before the jump. Drive world motion
+// with the same forward-distance curve, not with a delayed smoothstep.
+const DIVE_SPEED = 1.12;
+const DIVE_POSE_HOLD_TIME = 1.48;
+let diveTravel = null;
+const ROLL_LEAD_IN = .76;
 let rollTravel = null;
+let rollGroundBones = [];
+const rollGroundProbe = new THREE.Vector3();
+function rollStartTime() {
+  return rollAction ? Math.min(ROLL_LEAD_IN, rollAction.getClip().duration * .46) : 0;
+}
 const ROOM_BUILDERS = { ignis: buildIgnisRoom };
 const PROJECTS = [
   { id: 'ignis', name: 'Ignis', color: 0xff813b, x: -7.1, z: -10.1, page: 'projeto-ignis.html' },
@@ -370,18 +374,39 @@ function alignWalkingClip(sourceClip, target, source) {
 function stabilizeDiveClip(source) {
   if (!source) return null;
   const clip = source.clone();
+  diveTravel = null;
   for (const track of clip.tracks) {
     if (!/mixamorigHips\.position$/i.test(track.name)) continue;
     const values = track.values;
     if (values.length < 3) continue;
-    const originalX = values[0];
-    const originalY = values[1];
+    const originalX = values[0], originalY = values[1];
+    let forward = 0;
+    const distances = [];
     for (let i = 0; i < values.length; i += 3) {
+      // The original Z-up rig progresses on negative Y.
+      forward = Math.max(forward, originalY - values[i + 1]);
+      distances.push(forward);
       values[i] = originalX;
       values[i + 1] = originalY;
     }
+    if (forward > 1) diveTravel = {
+      times: Array.from(track.times), distances, total: forward
+    };
   }
   return clip;
+}
+function diveForwardProgress(time) {
+  if (!diveTravel || diveTravel.total <= 1) return THREE.MathUtils.smoothstep(time / 2.71, 0, 1);
+  const {times, distances, total} = diveTravel;
+  if (time <= times[0]) return 0;
+  if (time >= times[times.length - 1]) return 1;
+  let a = 0, b = times.length - 1;
+  while (b - a > 1) {
+    const mid = (a + b) >>> 1;
+    if (times[mid] <= time) a = mid; else b = mid;
+  }
+  const p = THREE.MathUtils.clamp((time - times[a]) / Math.max(.00001, times[b] - times[a]), 0, 1);
+  return THREE.MathUtils.clamp(THREE.MathUtils.lerp(distances[a], distances[b], p) / total, 0, 1);
 }
 
 // The walking animation has the upright shoulder and torso posture selected
@@ -512,6 +537,13 @@ function setupAnimations(mainObject, walkingObject) {
     diveAction.clampWhenFinished = true;
   }
   if (walkClip) walkAction = mixer.clipAction(walkClip, mainObject);
+  rollGroundBones = [
+    'mixamorigLeftFoot','mixamorigRightFoot',
+    'mixamorigLeftToeBase','mixamorigRightToeBase',
+    'mixamorigLeftHand','mixamorigRightHand',
+    'mixamorigLeftForeArm','mixamorigRightForeArm',
+    'mixamorigHead','mixamorigHips'
+  ].map(name => mainObject.getObjectByName(name)).filter(Boolean);
 
   if (idleAction) {
     activeAction = idleAction;
@@ -723,7 +755,8 @@ function startStagingWalk() {
 }
 function startDive() {
   if (!diveAction) return;
-  diveAction.reset().setEffectiveWeight(1).setEffectiveTimeScale(1).play();
+  diveAction.paused = false;
+  diveAction.reset().setEffectiveWeight(1).setEffectiveTimeScale(DIVE_SPEED).play();
   if (activeAction && activeAction !== diveAction) activeAction.crossFadeTo(diveAction, .12, false);
   activeAction = diveAction;
 }
@@ -735,8 +768,9 @@ function endDive() {
 }
 function beginRealRoll() {
   if (!rollAction) { endDive(); return false; }
+  rollAction.paused = false;
   rollAction.reset().setEffectiveWeight(1).setEffectiveTimeScale(1).play();
-  rollAction.time = Math.min(ROLL_LEAD_IN, rollAction.getClip().duration * .20);
+  rollAction.time = rollStartTime();
   if (activeAction && activeAction !== rollAction && activeAction.isRunning()) activeAction.crossFadeTo(rollAction, .08, false);
   activeAction = rollAction;
   return true;
@@ -748,6 +782,22 @@ function rollDistanceAt(time) {
   while (i < times.length - 1 && times[i] < time) i++;
   const p = THREE.MathUtils.clamp((time - times[i - 1]) / Math.max(.0001, times[i] - times[i - 1]), 0, 1);
   return THREE.MathUtils.lerp(distances[i - 1], distances[i], p) / total * distance;
+}
+function keepRollOnFloor(delta) {
+  if (!rollGroundBones.length || !characterRoot) return;
+  // A few skeletal contact points are enough. Avoid expensive per-vertex
+  // bounding boxes for the large skinned character on mobile.
+  characterRoot.updateMatrixWorld(true);
+  let minY = Infinity;
+  for (const bone of rollGroundBones) {
+    bone.getWorldPosition(rollGroundProbe);
+    const clearance = /Head|Hips/.test(bone.name) ? .12 :
+      /Hand|ForeArm/.test(bone.name) ? .065 : .045;
+    minY = Math.min(minY, rollGroundProbe.y - clearance);
+  }
+  if (!Number.isFinite(minY)) return;
+  const target = THREE.MathUtils.clamp(characterRoot.position.y + .035 - minY, -.22, .39);
+  characterRoot.position.y = THREE.MathUtils.damp(characterRoot.position.y, target, 17, delta);
 }
 function turnTowards(heading, delta) {
   const difference = Math.atan2(Math.sin(heading - characterRoot.rotation.y), Math.cos(heading - characterRoot.rotation.y));
@@ -777,7 +827,7 @@ async function enterPortal() {
       await ensureRollAnimation();
     }
     showRoomStatus('');
-    const duration = diveAction?.getClip()?.duration || 2.71;
+    const duration = (diveAction?.getClip()?.duration || 2.71) / DIVE_SPEED;
     const sign = portal.userData.returnPortal ? 1 : -1;
     const source = characterRoot.position.clone();
     const depth = (portal.position.z - source.z) * sign;
@@ -793,7 +843,7 @@ async function enterPortal() {
       portal, sign, source, staging, duration,
       outsideDistance: Math.max(.28, (portal.position.z - staging.z) * sign),
       elapsed: 0, phase: 'align', cameraStartYaw: cameraYaw,
-      approachDuration, switched: false, landingDuration: rollAction ? rollAction.getClip().duration - Math.min(ROLL_LEAD_IN, rollAction.getClip().duration * .20) : .22
+      approachDuration, switched: false, landingDuration: rollAction ? rollAction.getClip().duration - rollStartTime() : .22
     };
     // Camera and heading settle continuously in the alignment phase.
     characterMotion.rotation.x = 0;
@@ -865,19 +915,23 @@ function updateTransition(delta) {
     return;
   }
   if (t.phase === 'dive') {
-    const p = THREE.MathUtils.clamp((diveAction ? diveAction.time : t.elapsed) / t.duration, 0, 1);
-    // The FBX starts leaning around the middle of its clip. Previously the
-    // root reached the portal at p=.46, i.e. BEFORE the head-first pose was
-    // visible: the character went through the arch upright (video, ~6-8s).
-    // Hold the character outside until the dive anticipation is underway;
-    // cross the portal plane only at p=.74, then continue inside naturally.
-    const approach = THREE.MathUtils.smoothstep(p, DIVE_START_MOVEMENT, DIVE_REACH_PORTAL);
-    const departure = THREE.MathUtils.smoothstep(p, DIVE_REACH_PORTAL, DIVE_FINISH_CROSSING);
-    const z = t.portal.position.z - t.sign * t.outsideDistance * (1 - approach) + t.sign * 2.45 * departure;
+    const p = THREE.MathUtils.clamp(t.elapsed / t.duration, 0, 1);
+    const clipTime = Math.min(t.elapsed * DIVE_SPEED, diveAction?.getClip()?.duration || 2.71);
+    // Follow the native forward travel from the first running step. This
+    // removes the visible 'running in midair' while the root was held still.
+    const travel = diveForwardProgress(clipTime);
+    // The last third of Tripo's dive folds into a flip; hold its clean,
+    // head-first posture while the character finishes passing the membrane.
+    if (diveAction && !diveAction.paused && diveAction.time >= DIVE_POSE_HOLD_TIME) {
+      diveAction.time = DIVE_POSE_HOLD_TIME;
+      diveAction.paused = true;
+      mixer.update(0);
+    }
     characterRoot.position.set(
-      THREE.MathUtils.lerp(t.staging.x, t.portal.position.x, approach),
+      THREE.MathUtils.lerp(t.staging.x, t.portal.position.x,
+        THREE.MathUtils.clamp(travel * 1.8, 0, 1)),
       0,
-      z
+      t.staging.z + t.sign * (t.outsideDistance + .92) * travel
     );
     // Do not obscure the head-first crossing with the blue transition ring.
     if (p >= .90) portalTransition.classList.add('active');
@@ -903,7 +957,8 @@ function updateTransition(delta) {
     if (rollAction && !reducedMotion) {
       // Offset the trimmed lead-in so the model never jumps on the first roll frame.
       characterRoot.position.z -= Math.max(0,
-        rollDistanceAt(rollAction.time) - rollDistanceAt(Math.min(ROLL_LEAD_IN, rollAction.getClip().duration * .20)));
+        rollDistanceAt(rollAction.time) - rollDistanceAt(rollStartTime()));
+      keepRollOnFloor(delta);
     }
     if (reducedMotion ? t.elapsed >= .35 : p >= 1) {
       finishRealRoll();
@@ -911,10 +966,13 @@ function updateTransition(delta) {
     }
     return;
   }
-  if(t.phase === 'recover' && t.elapsed >= .22) {
+  if (t.phase === 'recover') {
+    characterRoot.position.y = THREE.MathUtils.damp(characterRoot.position.y, 0, 11, delta);
+    if (t.elapsed < .30) return;
       rollAction?.stop();
       characterMotion.rotation.x = 0;
       characterMotion.position.y = .92;
+      characterRoot.position.y = 0;
       busy = false;
       nearestPortal = null;
       transition = null;
