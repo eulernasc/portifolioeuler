@@ -5,7 +5,8 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
    registered in ROOM_BUILDERS without changing the character or camera. */
 const CHARACTER_ASSETS = 'assets/3d/character/';
 const ROLL_ANIMATION = `${CHARACTER_ASSETS}Stand-To-Roll.fbx`;
-const ROLL_LEAD_IN = .40; // Skip the standing wind-up: the character arrives mid-dive.
+const ROLL_LEAD_IN = 0; // Preserve the complete anticipation, roll and recovery.
+let rollTravel = null;
 const ROOM_BUILDERS = { ignis: buildIgnisRoom };
 const PROJECTS = [
   { id: 'ignis', name: 'Ignis', color: 0xff813b, x: -7.1, z: -10.1, page: 'projeto-ignis.html' },
@@ -451,6 +452,27 @@ async function ensureRollAnimation() {
     ).then(rollObject => {
       const source = rollObject.animations?.[0];
       if (!source) throw new Error('FBX sem animação de rolamento.');
+      const hips = source.tracks.find(track => /mixamorigHips\.position$/i.test(track.name));
+      if (hips) {
+        // Preserve the source clip's timing of ground travel, without its retreat.
+        const values = hips.values, times = Array.from(hips.times);
+        // The final key can retreat during stand-up; use the farthest pose
+        // to identify forward travel instead of the end-minus-start vector.
+        let dx = 0, dz = 0;
+        for(let i=0;i<values.length;i+=3) {
+          const x=values[i]-values[0], z=values[i+2]-values[2];
+          if(x*x+z*z>dx*dx+dz*dz){dx=x;dz=z;}
+        }
+        const length = Math.hypot(dx, dz) || 1;
+        let furthest = 0;
+        const distances = times.map((_, i) => {
+          const projected = ((values[i * 3] - values[0]) * dx + (values[i * 3 + 2] - values[2]) * dz) / length;
+          furthest = Math.max(furthest, projected);
+          return furthest;
+        });
+        rollTravel = { times, distances, total: furthest,
+          distance: 1.35 };
+      }
       const inPlace = stabilizeRollClip(source);
       const clip = matchRollHeading(alignWalkingClip(inPlace, modelObject, rollObject), walkAction?.getClip());
       rollAction = mixer.clipAction(clip, modelObject);
@@ -713,6 +735,18 @@ function beginRealRoll() {
   activeAction = rollAction;
   return true;
 }
+function rollDistanceAt(time) {
+  if (!rollTravel || rollTravel.total < .001) return 0;
+  const { times, distances, total, distance } = rollTravel;
+  let i = 1;
+  while (i < times.length - 1 && times[i] < time) i++;
+  const p = THREE.MathUtils.clamp((time - times[i - 1]) / Math.max(.0001, times[i] - times[i - 1]), 0, 1);
+  return THREE.MathUtils.lerp(distances[i - 1], distances[i], p) / total * distance;
+}
+function turnTowards(heading, delta) {
+  const difference = Math.atan2(Math.sin(heading - characterRoot.rotation.y), Math.cos(heading - characterRoot.rotation.y));
+  characterRoot.rotation.y += difference * (1 - Math.exp(-12 * delta));
+}
 function finishRealRoll() {
   if (!rollAction) { endDive(); return; }
   if (idleAction) {
@@ -752,22 +786,16 @@ async function enterPortal() {
     transition = {
       portal, sign, source, staging, duration,
       outsideDistance: Math.max(.28, (portal.position.z - staging.z) * sign),
-      elapsed: 0, phase: approachDuration ? 'approach' : 'dive',
+      elapsed: 0, phase: 'align', cameraStartYaw: cameraYaw,
       approachDuration, switched: false, landingDuration: rollAction ? rollAction.getClip().duration - Math.min(ROLL_LEAD_IN, rollAction.getClip().duration * .20) : .22
     };
-    cameraYaw = sign === -1 ? 0 : Math.PI;
-    cameraElevation = .40;
-    cameraDistance = lowPower ? 8.0 : 8.7;
+    // Camera and heading settle continuously in the alignment phase.
     characterMotion.rotation.x = 0;
     characterMotion.position.y = .92;
-    if (approachDuration) {
-      const heading = staging.clone().sub(source);
-      characterRoot.rotation.y = Math.atan2(heading.x, heading.z);
-      startStagingWalk();
-    } else {
-      characterRoot.rotation.y = sign === -1 ? Math.PI : 0;
-      applyCharacterClipping(true, portal);
-      startDive();
+    if(idleAction && activeAction !== idleAction) {
+      idleAction.reset().setEffectiveWeight(1).play();
+      activeAction?.crossFadeTo(idleAction,.16,false);
+      activeAction=idleAction;
     }
     hudProject.classList.remove('visible');
   } catch (error) {
@@ -801,12 +829,28 @@ function updateTransition(delta) {
   if (!transition) return;
   const t = transition;
   t.elapsed += delta;
+  if (t.phase === 'align') {
+    const heading = t.approachDuration ? Math.atan2(t.staging.x - t.source.x, t.staging.z - t.source.z) : (t.sign === -1 ? Math.PI : 0);
+    turnTowards(heading, delta);
+    const desiredYaw = t.sign === -1 ? 0 : Math.PI;
+    cameraYaw += Math.atan2(Math.sin(desiredYaw-cameraYaw),Math.cos(desiredYaw-cameraYaw)) * (1-Math.exp(-6*delta));
+    cameraElevation = THREE.MathUtils.lerp(cameraElevation,.40,1-Math.exp(-6*delta));
+    if (t.elapsed >= .38) {
+      t.phase = reducedMotion ? 'cover' : (t.approachDuration ? 'approach' : 'dive');
+      t.elapsed = 0;
+      if(reducedMotion) portalTransition.classList.add('active');
+      else if(t.approachDuration) startStagingWalk();
+      else {applyCharacterClipping(true,t.portal);startDive();}
+    }
+    return;
+  }
   if (t.phase === 'approach') {
     const p = THREE.MathUtils.clamp(t.elapsed / t.approachDuration, 0, 1);
-    characterRoot.position.lerpVectors(t.source, t.staging, THREE.MathUtils.smoothstep(p, 0, 1));
+    characterRoot.position.lerpVectors(t.source, t.staging, p);
+    turnTowards(t.sign === -1 ? Math.PI : 0, delta);
     if (p >= 1) {
       characterRoot.position.copy(t.staging);
-      characterRoot.rotation.y = t.sign === -1 ? Math.PI : 0;
+      turnTowards(t.sign === -1 ? Math.PI : 0, delta);
       t.phase = 'dive';
       t.elapsed = 0;
       applyCharacterClipping(true, t.portal);
@@ -815,7 +859,7 @@ function updateTransition(delta) {
     return;
   }
   if (t.phase === 'dive') {
-    const p = THREE.MathUtils.clamp(t.elapsed / t.duration, 0, 1);
+    const p = THREE.MathUtils.clamp((diveAction ? diveAction.time : t.elapsed) / t.duration, 0, 1);
     // The provided dive FBX leans head-first around 1.2-1.4 seconds (~45-50%).
     // Put the *portal plane* at that key pose, not at the end of the animation.
     // The hips' baked horizontal travel is removed in stabilizeDiveClip().
@@ -828,34 +872,39 @@ function updateTransition(delta) {
       z
     );
     if (p >= .77) portalTransition.classList.add('active');
-    if (p >= .95 && !t.switched) {
-      t.switched = true;
-      applyCharacterClipping(false);
-      activateWorld(t.portal.userData.returnPortal ? 'hall' : t.portal.userData.id);
-      beginRealRoll();
-      t.phase = 'landing';
-      t.elapsed = 0;
-      t.landingOrigin = characterRoot.position.clone();
-      // The animation performs the real somersault. Scene movement is separate
-      // and only goes forward, never inheriting Mixamo's final hips retreat.
-      portalTransition.classList.remove('active');
-    }
+    if (p >= .95) { t.phase = 'cover'; t.elapsed = 0; }
+    return;
+  }
+  if (t.phase === 'cover') {
+    if(t.elapsed < .30) return;
+    applyCharacterClipping(false);
+    activateWorld(t.portal.userData.returnPortal ? 'hall' : t.portal.userData.id);
+    // Change scene and camera only while the screen is completely covered.
+    diveAction?.stop(); walkAction?.stop(); idleAction?.stop();
+    if(reducedMotion) endDive(); else beginRealRoll();
+    t.phase='landing'; t.elapsed=0;
+    t.landingOrigin=characterRoot.position.clone();
     return;
   }
   if (t.phase === 'landing') {
     const p = THREE.MathUtils.clamp(t.elapsed / t.landingDuration, 0, 1);
-    const path = THREE.MathUtils.smoothstep(p, .02, .84);
+    if(t.elapsed >= .10) portalTransition.classList.remove('active');
     characterRoot.position.copy(t.landingOrigin);
     // Advance smoothly through the roll; do not reverse on the stand-up frames.
-    if (rollAction && !reducedMotion) characterRoot.position.z -= 1.35 * path;
-    if (p >= 1) {
+    if (rollAction && !reducedMotion) characterRoot.position.z -= rollDistanceAt(rollAction.time);
+    if (reducedMotion ? t.elapsed >= .35 : p >= 1) {
       finishRealRoll();
+      t.phase = 'recover'; t.elapsed = 0;
+    }
+    return;
+  }
+  if(t.phase === 'recover' && t.elapsed >= .22) {
+      rollAction?.stop();
       characterMotion.rotation.x = 0;
       characterMotion.position.y = .92;
       busy = false;
       nearestPortal = null;
       transition = null;
-    }
   }
 }
 function isMovementPressed() {
@@ -1104,3 +1153,5 @@ async function init() {
 }
 $('retry3d').addEventListener('click', () => location.reload());
 init();
+
+
