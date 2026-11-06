@@ -5,7 +5,13 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
    registered in ROOM_BUILDERS without changing the character or camera. */
 const CHARACTER_ASSETS = 'assets/3d/character/';
 const ROLL_ANIMATION = `${CHARACTER_ASSETS}Stand-To-Roll.fbx`;
-const ROLL_LEAD_IN = 0; // Preserve the complete anticipation, roll and recovery.
+// The supplied Stand-To-Roll.fbx begins with a standing anticipation.
+// Its hips rotate noticeably only after ~0.35-0.45 s (measured in the FBX).
+// Skip this pre-roll lead-in, retaining the actual roll and recovery.
+const ROLL_LEAD_IN = 0.44;
+const DIVE_START_MOVEMENT = 0.36; // Take off visibly before moving into the arch.
+const DIVE_REACH_PORTAL = 0.74;   // The hips reach the plane after the dive pose begins.
+const DIVE_FINISH_CROSSING = 0.96;
 let rollTravel = null;
 const ROOM_BUILDERS = { ignis: buildIgnisRoom };
 const PROJECTS = [
@@ -718,7 +724,7 @@ function startStagingWalk() {
 function startDive() {
   if (!diveAction) return;
   diveAction.reset().setEffectiveWeight(1).setEffectiveTimeScale(1).play();
-  if (activeAction && activeAction !== diveAction) activeAction.crossFadeTo(diveAction, .23, false);
+  if (activeAction && activeAction !== diveAction) activeAction.crossFadeTo(diveAction, .12, false);
   activeAction = diveAction;
 }
 function endDive() {
@@ -731,7 +737,7 @@ function beginRealRoll() {
   if (!rollAction) { endDive(); return false; }
   rollAction.reset().setEffectiveWeight(1).setEffectiveTimeScale(1).play();
   rollAction.time = Math.min(ROLL_LEAD_IN, rollAction.getClip().duration * .20);
-  if (activeAction && activeAction !== rollAction) activeAction.crossFadeTo(rollAction, .14, false);
+  if (activeAction && activeAction !== rollAction && activeAction.isRunning()) activeAction.crossFadeTo(rollAction, .08, false);
   activeAction = rollAction;
   return true;
 }
@@ -835,7 +841,7 @@ function updateTransition(delta) {
     const desiredYaw = t.sign === -1 ? 0 : Math.PI;
     cameraYaw += Math.atan2(Math.sin(desiredYaw-cameraYaw),Math.cos(desiredYaw-cameraYaw)) * (1-Math.exp(-6*delta));
     cameraElevation = THREE.MathUtils.lerp(cameraElevation,.40,1-Math.exp(-6*delta));
-    if (t.elapsed >= .38) {
+    if (t.elapsed >= .27) {
       t.phase = reducedMotion ? 'cover' : (t.approachDuration ? 'approach' : 'dive');
       t.elapsed = 0;
       if(reducedMotion) portalTransition.classList.add('active');
@@ -860,23 +866,26 @@ function updateTransition(delta) {
   }
   if (t.phase === 'dive') {
     const p = THREE.MathUtils.clamp((diveAction ? diveAction.time : t.elapsed) / t.duration, 0, 1);
-    // The provided dive FBX leans head-first around 1.2-1.4 seconds (~45-50%).
-    // Put the *portal plane* at that key pose, not at the end of the animation.
-    // The hips' baked horizontal travel is removed in stabilizeDiveClip().
-    const approach = THREE.MathUtils.smoothstep(p, .045, .46);
-    const departure = THREE.MathUtils.smoothstep(p, .46, .78);
+    // The FBX starts leaning around the middle of its clip. Previously the
+    // root reached the portal at p=.46, i.e. BEFORE the head-first pose was
+    // visible: the character went through the arch upright (video, ~6-8s).
+    // Hold the character outside until the dive anticipation is underway;
+    // cross the portal plane only at p=.74, then continue inside naturally.
+    const approach = THREE.MathUtils.smoothstep(p, DIVE_START_MOVEMENT, DIVE_REACH_PORTAL);
+    const departure = THREE.MathUtils.smoothstep(p, DIVE_REACH_PORTAL, DIVE_FINISH_CROSSING);
     const z = t.portal.position.z - t.sign * t.outsideDistance * (1 - approach) + t.sign * 2.45 * departure;
     characterRoot.position.set(
       THREE.MathUtils.lerp(t.staging.x, t.portal.position.x, approach),
       0,
       z
     );
-    if (p >= .77) portalTransition.classList.add('active');
-    if (p >= .95) { t.phase = 'cover'; t.elapsed = 0; }
+    // Do not obscure the head-first crossing with the blue transition ring.
+    if (p >= .90) portalTransition.classList.add('active');
+    if (p >= .985) { t.phase = 'cover'; t.elapsed = 0; }
     return;
   }
   if (t.phase === 'cover') {
-    if(t.elapsed < .30) return;
+    if(t.elapsed < .26) return;
     applyCharacterClipping(false);
     activateWorld(t.portal.userData.returnPortal ? 'hall' : t.portal.userData.id);
     // Change scene and camera only while the screen is completely covered.
@@ -888,10 +897,14 @@ function updateTransition(delta) {
   }
   if (t.phase === 'landing') {
     const p = THREE.MathUtils.clamp(t.elapsed / t.landingDuration, 0, 1);
-    if(t.elapsed >= .10) portalTransition.classList.remove('active');
+    if(t.elapsed >= .06) portalTransition.classList.remove('active');
     characterRoot.position.copy(t.landingOrigin);
     // Advance smoothly through the roll; do not reverse on the stand-up frames.
-    if (rollAction && !reducedMotion) characterRoot.position.z -= rollDistanceAt(rollAction.time);
+    if (rollAction && !reducedMotion) {
+      // Offset the trimmed lead-in so the model never jumps on the first roll frame.
+      characterRoot.position.z -= Math.max(0,
+        rollDistanceAt(rollAction.time) - rollDistanceAt(Math.min(ROLL_LEAD_IN, rollAction.getClip().duration * .20)));
+    }
     if (reducedMotion ? t.elapsed >= .35 : p >= 1) {
       finishRealRoll();
       t.phase = 'recover'; t.elapsed = 0;
@@ -1146,6 +1159,9 @@ async function init() {
     currentRoom.textContent = 'HALL PRINCIPAL';
     clock.start();
     animate();
+    // Preload the small roll FBX while the visitor explores the hall instead
+    // of pausing at the portal waiting for its first network request.
+    void ensureRollAnimation();
   } catch (err) {
     console.error('[Portfólio 3D] inicialização:', err);
     fail(err?.message || 'Falha ao preparar a galeria 3D.');
